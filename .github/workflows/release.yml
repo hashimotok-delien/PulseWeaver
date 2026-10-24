@@ -6,7 +6,8 @@ name: Release PulseWeaver
 #   2) 手動実行（Actions > Release PulseWeaver > Run workflow）でバージョンを入力
 #
 # 出力:
-#   - PulseWeaver-win-x64.zip             … Windows x64 自己完結ポータブル版
+#   - PulseWeaver-<version>-setup.exe   … インストーラ（インストール先を選択可能／管理者権限不要）
+#   - PulseWeaver-win-x64.zip           … Windows x64 自己完結ポータブル版
 #   - SHA256SUMS.txt
 
 on:
@@ -106,12 +107,38 @@ jobs:
           }
           Get-ChildItem dist -File | Select-Object Name, Length | Format-Table | Out-String | Write-Host
 
-      - name: 5. Checksums
+      - name: 5. Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup のインストールに失敗しました。' }
+
+      - name: 6. Build installer
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = @(
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+            'C:\Program Files\Inno Setup 6\ISCC.exe',
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw 'ISCC.exe が見つかりません。' }
+
+          & $iscc "/DVERSION=$env:VERSION" 'installer\PulseWeaver.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'インストーラのビルドに失敗しました。' }
+
+          $setup = "dist\PulseWeaver-$env:VERSION-setup.exe"
+          if (-not (Test-Path $setup)) { throw "インストーラが見つかりません: $setup" }
+          Get-Item $setup | Select-Object Name, Length | Format-Table | Out-String | Write-Host
+
+      - name: 7. Checksums
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $files = @(Get-ChildItem -Path 'dist\PulseWeaver-win-x64.zip' -File -ErrorAction SilentlyContinue)
+          $files = @(Get-ChildItem -Path 'dist\*.zip', 'dist\*-setup.exe' -File -ErrorAction SilentlyContinue)
           if ($files.Count -eq 0) {
             throw 'チェックサム対象のファイルが見つかりません（ビルドに失敗しています）。'
           }
@@ -135,17 +162,30 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
           body: |
-            ## ダウンロード
+            ## インストール
 
-            `PulseWeaver-win-x64.zip` を展開し、`PulseWeaver.exe` を実行してください。
+            下の `PulseWeaver-${{ steps.version.outputs.value }}-setup.exe` を実行し、ウィザードに従ってください
+            （インストール先は変更できます／管理者権限不要）。
+
+            コマンドラインから入れる場合:
+
+            ```powershell
+            .\PulseWeaver-${{ steps.version.outputs.value }}-setup.exe /VERYSILENT
+            ```
 
             **動作要件**: Windows 10/11 x64。アプリは自己完結型のため、.NET ランタイムの別途インストールは不要です。
-            Discordへミックス音声を送るには、VB-CABLE などの仮想オーディオデバイスを別途インストールしてください。
+            Discordへミックス音声を送るには、VB-CABLE などの仮想オーディオデバイスを別途インストールしてください
+            （セットアップ完了画面から配布ページを開けます）。
+
+            ### ポータブル版
+
+            インストーラを使わない場合は `PulseWeaver-win-x64.zip` を展開し、そのまま `PulseWeaver.exe` を実行してください。
 
             > このアプリはコード署名されていないため、SmartScreen の警告が表示される場合があります。
 
             `SHA256SUMS.txt` でダウンロードしたファイルを検証できます。
           files: |
+            dist/PulseWeaver-*-setup.exe
             dist/PulseWeaver-win-x64.zip
             dist/SHA256SUMS.txt
           fail_on_unmatched_files: true

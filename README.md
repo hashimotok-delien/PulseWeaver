@@ -26,3 +26,15 @@ VB-CABLE は公式配布元から別途インストールしてください。�
 Discord とゲームなどをそれぞれ個別のフェーダー／出力先へ振り分ける機能、プロファイル保存、マイクモニター機能はまだありません。現在は選択した再生デバイス上の音声を一括で取り込みます。
 
 NAudio は MIT License のライブラリです。
+
+## 配布物のビルド
+
+GitHub Actions の `.github/workflows/release.yml` が、タグ push（例: `v0.1.0`）でインストーラと ZIP を作成してリリースします。ローカルで作る場合:
+
+```powershell
+dotnet publish .\PulseWeaver\PulseWeaver.csproj -c Release -r win-x64 --self-contained true `
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=0.1.0 -o dist\publish
+iscc /DVERSION=0.1.0 .\installer\PulseWeaver.iss
+```
+
+インストーラは [Inno Setup 6](https://jrsoftware.org/isdl.php) でビルドします（商用配布にはライセンス購入が必要です）。
