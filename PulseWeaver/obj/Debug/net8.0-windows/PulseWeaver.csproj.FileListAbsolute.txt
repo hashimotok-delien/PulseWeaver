@@ -27,3 +27,8 @@ D:\プログラミング\C_Sharp\PulseWeaver\PulseWeaver\obj\Debug\net8.0-window
 D:\プログラミング\C_Sharp\PulseWeaver\PulseWeaver\obj\Debug\net8.0-windows\PulseWeaver.pdb
 D:\プログラミング\C_Sharp\PulseWeaver\PulseWeaver\obj\Debug\net8.0-windows\PulseWeaver.genruntimeconfig.cache
 D:\プログラミング\C_Sharp\PulseWeaver\PulseWeaver\obj\Debug\net8.0-windows\ref\PulseWeaver.dll
+C:\Users\monster2408\AppData\Local\Temp\pw-oldver\PulseWeaver.exe
+C:\Users\monster2408\AppData\Local\Temp\pw-oldver\PulseWeaver.deps.json
+C:\Users\monster2408\AppData\Local\Temp\pw-oldver\PulseWeaver.runtimeconfig.json
+C:\Users\monster2408\AppData\Local\Temp\pw-oldver\PulseWeaver.dll
+C:\Users\monster2408\AppData\Local\Temp\pw-oldver\PulseWeaver.pdb

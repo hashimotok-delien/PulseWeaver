@@ -12,11 +12,11 @@ using System.Reflection;
 
 [assembly: System.Reflection.AssemblyCompanyAttribute("PulseWeaver")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
-[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b022cdd1cae88eee2c6e4a6fbc0a37da9764291d")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("0.0.1.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.0.1+4869cfd2bfda676a39394218b1f1f658552dd361")]
 [assembly: System.Reflection.AssemblyProductAttribute("PulseWeaver")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PulseWeaver")]
-[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyVersionAttribute("0.0.1.0")]
 [assembly: System.Runtime.Versioning.TargetPlatformAttribute("Windows7.0")]
 [assembly: System.Runtime.Versioning.SupportedOSPlatformAttribute("Windows7.0")]
 
