@@ -9,6 +9,14 @@ internal sealed class AppSettings
 
     public bool AutoCheckForUpdates { get; set; } = true;
 
+    public bool AutoStartWithWindows { get; set; }
+
+    public bool BackgroundStart { get; set; }
+
+    public bool AutoStartMix { get; set; }
+
+    public string? DefaultProfile { get; set; }
+
     public int OutputLatencyMs { get; set; } = 100;
 
     public DateTime? LastUpdateCheckUtc { get; set; }
@@ -70,6 +78,10 @@ internal sealed class AppSettings
     public AppSettings Clone() => new()
     {
         AutoCheckForUpdates = AutoCheckForUpdates,
+        AutoStartWithWindows = AutoStartWithWindows,
+        BackgroundStart = BackgroundStart,
+        AutoStartMix = AutoStartMix,
+        DefaultProfile = DefaultProfile,
         OutputLatencyMs = OutputLatencyMs,
         LastUpdateCheckUtc = LastUpdateCheckUtc,
         HardwareInputIds = (string?[])HardwareInputIds.Clone(),
@@ -96,6 +108,19 @@ internal sealed class AppSettings
         {
             AppLog.Error("設定の保存に失敗しました。", exception);
         }
+    }
+
+    /// <summary>
+    /// 構成（プロファイル）を適用するときに、アプリの動作設定は現在のものを引き継ぐ。
+    /// </summary>
+    public void CopyBehaviorFrom(AppSettings other)
+    {
+        AutoCheckForUpdates = other.AutoCheckForUpdates;
+        AutoStartWithWindows = other.AutoStartWithWindows;
+        BackgroundStart = other.BackgroundStart;
+        AutoStartMix = other.AutoStartMix;
+        DefaultProfile = other.DefaultProfile;
+        LastUpdateCheckUtc = other.LastUpdateCheckUtc;
     }
 
     public void EnsureShape()

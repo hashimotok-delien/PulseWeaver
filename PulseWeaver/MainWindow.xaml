@@ -366,13 +366,36 @@
                     <Grid>
                         <StackPanel x:Name="GeneralSettingsPanel">
                             <TextBlock Text="一般" Style="{StaticResource SectionTitle}"/>
-                            <Border Style="{StaticResource Card}">
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                                 <StackPanel>
                                     <CheckBox x:Name="AutoCheckCheckBox" Content="起動時にアップデートを自動確認する（24時間に1回）"
-                                              Foreground="#F1F5F9" Checked="AutoCheckCheckBox_Changed"
-                                              Unchecked="AutoCheckCheckBox_Changed"/>
+                                              Foreground="#F1F5F9" Checked="GeneralOption_Changed"
+                                              Unchecked="GeneralOption_Changed"/>
                                     <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
                                                Text="オフにすると、自動では確認せず「更新情報」から手動で確認します。"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <CheckBox x:Name="AutoStartCheckBox" Content="Windows 起動時に PulseWeaver を自動起動する"
+                                              Foreground="#F1F5F9" Checked="GeneralOption_Changed"
+                                              Unchecked="GeneralOption_Changed"/>
+                                    <CheckBox x:Name="BackgroundStartCheckBox" Content="バックグラウンドで起動する（タスクトレイに常駐）"
+                                              Foreground="#F1F5F9" Margin="0,10,0,0" Checked="GeneralOption_Changed"
+                                              Unchecked="GeneralOption_Changed"/>
+                                    <CheckBox x:Name="AutoStartMixCheckBox" Content="起動時にミックスを自動開始する"
+                                              Foreground="#F1F5F9" Margin="0,10,0,0" Checked="GeneralOption_Changed"
+                                              Unchecked="GeneralOption_Changed"/>
+                                    <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
+                                               Text="バックグラウンド起動を有効にすると、閉じるボタンでタスクトレイに格納され、ミックスは動き続けます。自動起動と併用するとタスクトレイで静かに起動します。"/>
+
+                                    <TextBlock Text="起動時に適用する既定の構成" Foreground="#C6D0DE" Margin="0,16,0,0"/>
+                                    <ComboBox x:Name="DefaultProfileCombo" Margin="0,6,0,0" Height="34" Width="320"
+                                              HorizontalAlignment="Left" DisplayMemberPath="Name"
+                                              SelectionChanged="DefaultProfileCombo_SelectionChanged"/>
+                                    <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
+                                               Text="「（現在の設定）」を選ぶと、前回終了時の構成で起動します。"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
@@ -417,6 +440,9 @@
                                         <Button x:Name="SaveProfileButton" Style="{StaticResource PrimaryButton}"
                                                 Content="保存" Margin="8,0,0,0" Padding="16,7"
                                                 Click="SaveProfileButton_Click"/>
+                                        <Button x:Name="OverwriteProfileButton" Style="{StaticResource SecondaryButton}"
+                                                Content="選択中に上書き" Margin="8,0,0,0" Padding="16,7"
+                                                IsEnabled="False" Click="OverwriteProfileButton_Click"/>
                                     </StackPanel>
 
                                     <StackPanel Orientation="Horizontal" Margin="0,16,0,0">

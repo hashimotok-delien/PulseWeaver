@@ -6,11 +6,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <Version>0.0.5</Version>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Version>0.0.6</Version>
     <Product>PulseWeaver</Product>
     <AssemblyTitle>PulseWeaver</AssemblyTitle>
     <ApplicationIcon>Assets\PulseWeaver.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />

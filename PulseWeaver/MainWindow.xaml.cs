@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.IO;
+using Drawing = System.Drawing;
+using WinForms = System.Windows.Forms;
 using System.Windows;
 using System.Windows.Controls;
 using System.ComponentModel;
@@ -31,20 +33,37 @@ public partial class MainWindow : Window
     private bool _isCheckingUpdates;
     private bool _isUpdating;
     private bool _isRefreshingProfiles;
+    private WinForms.NotifyIcon? _trayIcon;
+    private bool _isExiting;
+    private readonly bool _startHidden;
 
-    public MainWindow()
+    public MainWindow(bool startHidden = false)
     {
+        _startHidden = startHidden;
         InitializeComponent();
         ApplySettingsToUi();
         LoadDevices();
         BuildMixerRows(reloadDevices: false);
         RefreshProfiles();
         Loaded += MainWindow_Loaded;
+        Closing += MainWindow_Closing;
         Closed += MainWindow_Closed;
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        ApplyDefaultProfileIfNeeded();
+
+        if (_startHidden && _settings.BackgroundStart)
+        {
+            HideToTray(showBalloon: false);
+        }
+
+        if (_settings.AutoStartMix)
+        {
+            StartMixing(showValidationMessages: false);
+        }
+
         if (_settings.AutoCheckForUpdates && _settings.IsAutoCheckDue())
         {
             await CheckForUpdatesAsync(userInitiated: false);
@@ -55,8 +74,26 @@ public partial class MainWindow : Window
         }
     }
 
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_isExiting || !_settings.BackgroundStart)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        HideToTray(showBalloon: true);
+    }
+
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        if (_trayIcon is not null)
+        {
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+            _trayIcon = null;
+        }
+
         _mixer?.Dispose();
         _updateService.Dispose();
         _deviceEnumerator.Dispose();
@@ -70,7 +107,11 @@ public partial class MainWindow : Window
             VersionText.Text = AppInfo.DisplayVersion;
             CurrentVersionText.Text = AppInfo.DisplayVersion;
             AboutVersionText.Text = $"PulseWeaver {AppInfo.DisplayVersion}";
+            _settings.AutoStartWithWindows = StartupService.IsEnabled();
             AutoCheckCheckBox.IsChecked = _settings.AutoCheckForUpdates;
+            AutoStartCheckBox.IsChecked = _settings.AutoStartWithWindows;
+            BackgroundStartCheckBox.IsChecked = _settings.BackgroundStart;
+            AutoStartMixCheckBox.IsChecked = _settings.AutoStartMix;
 
             foreach (var item in LatencyCombo.Items.OfType<ComboBoxItem>())
             {
@@ -408,7 +449,7 @@ public partial class MainWindow : Window
         AboutSettingsPanel.Visibility = index == 4 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void AutoCheckCheckBox_Changed(object sender, RoutedEventArgs e)
+    private void GeneralOption_Changed(object sender, RoutedEventArgs e)
     {
         if (_isApplyingSettings)
         {
@@ -416,6 +457,45 @@ public partial class MainWindow : Window
         }
 
         _settings.AutoCheckForUpdates = AutoCheckCheckBox.IsChecked == true;
+        _settings.BackgroundStart = BackgroundStartCheckBox.IsChecked == true;
+        _settings.AutoStartMix = AutoStartMixCheckBox.IsChecked == true;
+
+        var autoStart = AutoStartCheckBox.IsChecked == true;
+        try
+        {
+            if (autoStart != _settings.AutoStartWithWindows || autoStart)
+            {
+                StartupService.SetEnabled(autoStart, _settings.BackgroundStart);
+            }
+
+            _settings.AutoStartWithWindows = autoStart;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("自動起動の設定を変更できませんでした。", exception);
+            _isApplyingSettings = true;
+            AutoStartCheckBox.IsChecked = _settings.AutoStartWithWindows;
+            _isApplyingSettings = false;
+
+            MessageBox.Show(
+                $"自動起動の設定を変更できませんでした。{Environment.NewLine}{exception.Message}",
+                "自動起動",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+
+        _settings.Save();
+        UpdateTrayIcon();
+    }
+
+    private void DefaultProfileCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isApplyingSettings || DefaultProfileCombo.SelectedItem is not ProfileEntry entry)
+        {
+            return;
+        }
+
+        _settings.DefaultProfile = string.IsNullOrEmpty(entry.Name) ? null : entry.Name;
         _settings.Save();
     }
 
@@ -844,9 +924,148 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ApplyDefaultProfileIfNeeded()
+    {
+        var name = _settings.DefaultProfile;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        try
+        {
+            var path = ProfileService.GetPath(name);
+            if (!File.Exists(path))
+            {
+                AppLog.Info($"既定の構成が見つかりません: {path}");
+                return;
+            }
+
+            ApplySettings(ProfileService.LoadFromFile(path));
+            AppLog.Info($"既定の構成を適用しました: {name}");
+            StatusText.Text = $"既定の構成「{name}」を適用しました。";
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error($"既定の構成「{name}」を適用できませんでした。", exception);
+        }
+    }
+
+    private void UpdateTrayIcon()
+    {
+        if (!_settings.BackgroundStart)
+        {
+            if (_trayIcon is not null)
+            {
+                _trayIcon.Visible = false;
+                _trayIcon.Dispose();
+                _trayIcon = null;
+            }
+
+            return;
+        }
+
+        if (_trayIcon is not null)
+        {
+            return;
+        }
+
+        var menu = new WinForms.ContextMenuStrip();
+        menu.Items.Add("表示", null, (_, _) => ShowFromTray());
+        menu.Items.Add("ミックス開始/停止", null, (_, _) => ToggleMixingFromTray());
+        menu.Items.Add(new WinForms.ToolStripSeparator());
+        menu.Items.Add("終了", null, (_, _) => ExitApplication());
+
+        _trayIcon = new WinForms.NotifyIcon
+        {
+            Icon = LoadAppIcon(),
+            Text = "PulseWeaver",
+            Visible = true,
+            ContextMenuStrip = menu
+        };
+        _trayIcon.DoubleClick += (_, _) => ShowFromTray();
+    }
+
+    private static Drawing.Icon LoadAppIcon()
+    {
+        try
+        {
+            var resource = System.Windows.Application.GetResourceStream(new Uri("Assets/PulseWeaver.ico", UriKind.Relative));
+            if (resource is not null)
+            {
+                using var stream = resource.Stream;
+                return new Drawing.Icon(stream);
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("トレイアイコンを読み込めませんでした。", exception);
+        }
+
+        return Drawing.SystemIcons.Application;
+    }
+
+    private void HideToTray(bool showBalloon)
+    {
+        UpdateTrayIcon();
+        if (_trayIcon is null)
+        {
+            // トレイに格納できないと復帰手段がなくなるため、その場合は表示したままにする
+            AppLog.Error("トレイアイコンを作成できませんでした。ウィンドウを表示したままにします。");
+            Show();
+            return;
+        }
+
+        Hide();
+
+        if (showBalloon && _trayIcon is not null)
+        {
+            _trayIcon.ShowBalloonTip(2000, "PulseWeaver", "バックグラウンドで動作しています。タスクトレイから再表示できます。",
+                WinForms.ToolTipIcon.Info);
+        }
+    }
+
+    private void ShowFromTray()
+    {
+        Show();
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        Activate();
+        Topmost = true;
+        Topmost = false;
+        Focus();
+    }
+
+    private void ToggleMixingFromTray()
+    {
+        if (_mixer is null)
+        {
+            StartMixing(showValidationMessages: false);
+        }
+        else
+        {
+            _mixer.Dispose();
+            _mixer = null;
+            StartButton.IsEnabled = true;
+            StopButton.IsEnabled = false;
+            StatusText.Text = "停止しました。";
+        }
+    }
+
+    private void ExitApplication()
+    {
+        _isExiting = true;
+        Close();
+    }
+
     private void RefreshProfiles(string? selectName = null)
     {
         _isRefreshingProfiles = true;
+        var wasApplying = _isApplyingSettings;
+        _isApplyingSettings = true;
         try
         {
             var profiles = ProfileService.ListProfiles();
@@ -854,6 +1073,15 @@ public partial class MainWindow : Window
             ProfileCombo.SelectedItem = selectName is null
                 ? null
                 : profiles.FirstOrDefault(profile => string.Equals(profile.Name, selectName, StringComparison.OrdinalIgnoreCase));
+            OverwriteProfileButton.IsEnabled = ProfileCombo.SelectedItem is not null;
+
+            var defaultOptions = new List<ProfileEntry> { new("（現在の設定）", string.Empty) };
+            defaultOptions.AddRange(profiles);
+            DefaultProfileCombo.ItemsSource = defaultOptions;
+            var currentDefault = _settings.DefaultProfile ?? string.Empty;
+            DefaultProfileCombo.SelectedItem = defaultOptions
+                .FirstOrDefault(option => string.Equals(option.Name, currentDefault, StringComparison.OrdinalIgnoreCase))
+                ?? defaultOptions[0];
 
             ProfileStatusText.Text = profiles.Count == 0
                 ? "保存済みの構成はありません。「現在の構成を保存」で作成できます。"
@@ -861,6 +1089,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _isApplyingSettings = wasApplying;
             _isRefreshingProfiles = false;
         }
     }
@@ -871,6 +1100,9 @@ public partial class MainWindow : Window
         {
             return;
         }
+
+        ProfileNameBox.Text = entry.Name;
+        OverwriteProfileButton.IsEnabled = true;
 
         try
         {
@@ -889,6 +1121,19 @@ public partial class MainWindow : Window
         try
         {
             var name = ProfileService.SanitizeName(ProfileNameBox.Text);
+            if (File.Exists(ProfileService.GetPath(name)))
+            {
+                var answer = MessageBox.Show(
+                    $"「{name}」は既に存在します。上書きしますか？",
+                    "上書きの確認",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                if (answer != MessageBoxResult.Yes)
+                {
+                    return;
+                }
+            }
+
             ProfileService.SaveProfile(name, _settings);
             ProfileNameBox.Text = string.Empty;
             RefreshProfiles(name);
@@ -898,6 +1143,36 @@ public partial class MainWindow : Window
         {
             AppLog.Error("構成を保存できませんでした。", exception);
             ProfileStatusText.Text = $"保存できませんでした: {exception.Message}";
+        }
+    }
+
+    private void OverwriteProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (ProfileCombo.SelectedItem is not ProfileEntry entry)
+        {
+            return;
+        }
+
+        var answer = MessageBox.Show(
+            $"「{entry.Name}」を現在の設定で上書きしますか？",
+            "上書きの確認",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (answer != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            ProfileService.SaveProfile(entry.Name, _settings);
+            RefreshProfiles(entry.Name);
+            ProfileStatusText.Text = $"「{entry.Name}」を上書きしました。";
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("構成を上書きできませんでした。", exception);
+            ProfileStatusText.Text = $"上書きできませんでした: {exception.Message}";
         }
     }
 
@@ -975,6 +1250,7 @@ public partial class MainWindow : Window
     private void ApplySettings(AppSettings settings)
     {
         settings.EnsureShape();
+        settings.CopyBehaviorFrom(_settings);
         _settings = settings;
         _settings.Save();
         ApplySettingsToUi();
