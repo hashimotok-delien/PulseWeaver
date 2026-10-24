@@ -9,7 +9,10 @@ namespace PulseWeaver;
 internal sealed record UpdateRelease(
     string Version,
     string TagName,
+    string Name,
     string HtmlUrl,
+    DateTimeOffset? PublishedAt,
+    bool IsPrerelease,
     string? InstallerUrl,
     string? InstallerName,
     string? ChecksumsUrl);
@@ -25,12 +28,12 @@ internal sealed class UpdateService : IDisposable
         _httpClient.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
     }
 
-    public async Task<UpdateRelease?> GetLatestAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<UpdateRelease>> GetReleasesAsync(CancellationToken cancellationToken)
     {
         using var stream = await _httpClient.GetStreamAsync(AppInfo.ReleasesApiUrl, cancellationToken);
         using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
 
-        UpdateRelease? latest = null;
+        var releases = new List<UpdateRelease>();
         foreach (var release in document.RootElement.EnumerateArray())
         {
             if (release.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True)
@@ -71,19 +74,37 @@ internal sealed class UpdateService : IDisposable
                 }
             }
 
-            if (latest is not null && VersionComparer.Compare(version, latest.Version) <= 0)
+            var name2 = release.TryGetProperty("name", out var nameProperty) ? nameProperty.GetString() : null;
+            var htmlUrl = release.TryGetProperty("html_url", out var htmlElement) ? htmlElement.GetString() : null;
+            var isPrerelease = release.TryGetProperty("prerelease", out var pre) && pre.ValueKind == JsonValueKind.True;
+            DateTimeOffset? publishedAt = null;
+            if (release.TryGetProperty("published_at", out var publishedElement) &&
+                DateTimeOffset.TryParse(publishedElement.GetString(), out var parsed))
             {
-                continue;
+                publishedAt = parsed;
             }
 
-            var htmlUrl = release.TryGetProperty("html_url", out var htmlElement)
-                ? htmlElement.GetString() ?? AppInfo.ReleasesUrl
-                : AppInfo.ReleasesUrl;
-
-            latest = new UpdateRelease(version, tagName ?? $"v{version}", htmlUrl, installerUrl, installerName, checksumsUrl);
+            releases.Add(new UpdateRelease(
+                version,
+                tagName ?? $"v{version}",
+                name2 ?? $"v{version}",
+                htmlUrl ?? AppInfo.ReleasesUrl,
+                publishedAt,
+                isPrerelease,
+                installerUrl,
+                installerName,
+                checksumsUrl));
         }
 
-        return latest;
+        return releases
+            .OrderByDescending(release => release, Comparer<UpdateRelease>.Create((a, b) => VersionComparer.Compare(a.Version, b.Version)))
+            .ToArray();
+    }
+
+    public async Task<UpdateRelease?> GetLatestAsync(CancellationToken cancellationToken)
+    {
+        var releases = await GetReleasesAsync(cancellationToken);
+        return releases.Count == 0 ? null : releases[0];
     }
 
     public async Task<string> DownloadInstallerAsync(UpdateRelease release, IProgress<double>? progress, CancellationToken cancellationToken)

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -6,13 +6,19 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <Version>0.0.3</Version>
+    <Version>0.0.4</Version>
     <Product>PulseWeaver</Product>
     <AssemblyTitle>PulseWeaver</AssemblyTitle>
+    <ApplicationIcon>Assets\PulseWeaver.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Resource Include="Assets\PulseWeaver.ico" />
+  </ItemGroup>
+
 </Project>
+

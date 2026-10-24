@@ -2,17 +2,28 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using NAudio.CoreAudioApi;
 
 namespace PulseWeaver;
 
 public partial class MainWindow : Window
 {
+    private static readonly string[] VirtualInputLabels = { "Windows デフォルト出力", "Discord 出力", "音声出力先" };
+    private const int HardwareInputCount = 6;
+    private const int VirtualInputCount = 3;
+    private const int OutputCount = 4;
+    private const int ChannelCount = HardwareInputCount + VirtualInputCount;
+
     private readonly MMDeviceEnumerator _deviceEnumerator = new();
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly UpdateService _updateService = new();
+    private readonly List<MixerChannelRow> _channelRows = new();
+    private readonly List<MixerOutputRow> _outputRows = new();
     private MixerEngine? _mixer;
+    private IReadOnlyList<UpdateRelease> _releases = Array.Empty<UpdateRelease>();
     private UpdateRelease? _availableRelease;
+    private bool _isInitializingUi;
     private bool _isApplyingSettings;
     private bool _isCheckingUpdates;
     private bool _isUpdating;
@@ -22,6 +33,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         ApplySettingsToUi();
         LoadDevices();
+        BuildMixerRows();
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
     }
@@ -81,41 +93,249 @@ public partial class MainWindow : Window
     {
         try
         {
-            var renderDevices = _deviceEnumerator
+            _renderDevices = _deviceEnumerator
                 .EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active)
                 .Select(device => new AudioDeviceOption(device.ID, device.FriendlyName))
                 .ToArray();
-            var captureDevices = _deviceEnumerator
+            _captureDevices = _deviceEnumerator
                 .EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active)
                 .Select(device => new AudioDeviceOption(device.ID, device.FriendlyName))
                 .ToArray();
 
-            SystemAudioDeviceCombo.ItemsSource = renderDevices;
-            OutputDeviceCombo.ItemsSource = renderDevices;
-            MicrophoneDeviceCombo.ItemsSource = captureDevices;
-
-            var defaultRenderId = GetDefaultDeviceId(DataFlow.Render, Role.Multimedia);
-            var defaultCaptureId = GetDefaultDeviceId(DataFlow.Capture, Role.Communications);
-
-            SystemAudioDeviceCombo.SelectedItem = renderDevices.FirstOrDefault(device => device.Id == defaultRenderId)
-                ?? renderDevices.FirstOrDefault();
-            MicrophoneDeviceCombo.SelectedItem = captureDevices.FirstOrDefault(device => device.Id == defaultCaptureId)
-                ?? captureDevices.FirstOrDefault();
-            OutputDeviceCombo.SelectedItem = PickOutputDevice(
-                renderDevices,
-                (SystemAudioDeviceCombo.SelectedItem as AudioDeviceOption)?.Id);
-
-            if (captureDevices.Length == 0)
+            if (_captureDevices.Length == 0)
             {
-                StatusText.Text = "利用可能なマイク入力がありません。マイクを接続してアプリを再起動してください。";
+                StatusText.Text = "録音デバイスが見つかりません。マイクを接続してアプリを再起動してください。";
             }
         }
         catch (Exception exception)
         {
+            _renderDevices = Array.Empty<AudioDeviceOption>();
+            _captureDevices = Array.Empty<AudioDeviceOption>();
             AppLog.Error("音声デバイスの列挙に失敗しました。", exception);
             StatusText.Text = $"音声デバイスを取得できませんでした。{exception.Message}";
         }
     }
+
+    private AudioDeviceOption[] _renderDevices = Array.Empty<AudioDeviceOption>();
+    private AudioDeviceOption[] _captureDevices = Array.Empty<AudioDeviceOption>();
+
+    private void BuildMixerRows()
+    {
+        _isInitializingUi = true;
+        try
+        {
+            var none = new AudioDeviceOption(string.Empty, "（なし）");
+            var renderOptions = new[] { none }.Concat(_renderDevices).ToArray();
+            var captureOptions = new[] { none }.Concat(_captureDevices).ToArray();
+
+            var defaultRenderId = GetDefaultDeviceId(DataFlow.Render, Role.Multimedia);
+            var defaultCommunicationCaptureId = GetDefaultDeviceId(DataFlow.Capture, Role.Communications);
+            var defaultMultimediaCaptureId = GetDefaultDeviceId(DataFlow.Capture, Role.Multimedia);
+
+            var virtualDefaults = PickVirtualDefaults(renderOptions, defaultRenderId);
+            var outputDefaults = PickOutputDefaults(renderOptions, defaultRenderId);
+
+            for (var i = 0; i < HardwareInputCount; i++)
+            {
+                var defaultId = i switch
+                {
+                    0 => defaultCommunicationCaptureId ?? defaultMultimediaCaptureId,
+                    1 => defaultMultimediaCaptureId != defaultCommunicationCaptureId ? defaultMultimediaCaptureId : null,
+                    _ => null
+                };
+                var selected = ResolveDevice(captureOptions, _settings.HardwareInputIds[i], defaultId);
+                _channelRows.Add(new MixerChannelRow(i, $"H/W入力 {i + 1}", "H/W入力", false, captureOptions,
+                    selected, _settings.InputVolumes[i], GetRouting(i)));
+            }
+
+            for (var i = 0; i < VirtualInputCount; i++)
+            {
+                var index = HardwareInputCount + i;
+                var selected = ResolveDevice(renderOptions, _settings.VirtualInputIds[i], virtualDefaults[i]);
+                _channelRows.Add(new MixerChannelRow(index, VirtualInputLabels[i], $"バーチャル入力 {i + 1}", true,
+                    renderOptions, selected, _settings.InputVolumes[index], GetRouting(index)));
+            }
+
+            for (var i = 0; i < OutputCount; i++)
+            {
+                var selected = ResolveDevice(renderOptions, _settings.HardwareOutputIds[i], outputDefaults[i]);
+                _outputRows.Add(new MixerOutputRow(i, $"A{i + 1}", renderOptions, selected));
+            }
+
+            HardwareInputList.ItemsSource = _channelRows.Take(HardwareInputCount).ToArray();
+            VirtualInputList.ItemsSource = _channelRows.Skip(HardwareInputCount).ToArray();
+            HardwareOutputList.ItemsSource = _outputRows.ToArray();
+
+            DisableFeedbackRoutes();
+            SaveMixerSettings();
+        }
+        finally
+        {
+            _isInitializingUi = false;
+        }
+    }
+
+    private void DisableFeedbackRoutes()
+    {
+        foreach (var channel in _channelRows.Where(row => row.IsVirtual && row.SelectedDevice is { } device && device.Id.Length > 0))
+        {
+            for (var output = 0; output < _outputRows.Count; output++)
+            {
+                if (_outputRows[output].SelectedDevice?.Id == channel.SelectedDevice!.Id)
+                {
+                    channel.Routing[output] = false;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> FindFeedbackLoops(MixerInputDefinition[] inputs, MixerOutputDefinition[] outputs)
+    {
+        for (var i = 0; i < inputs.Length; i++)
+        {
+            var input = inputs[i];
+            if (!input.IsLoopback || input.DeviceId is null)
+            {
+                continue;
+            }
+
+            for (var output = 0; output < outputs.Length; output++)
+            {
+                if (outputs[output].DeviceId is null || !input.Routing[output])
+                {
+                    continue;
+                }
+
+                if (string.Equals(input.DeviceId, outputs[output].DeviceId, StringComparison.Ordinal))
+                {
+                    yield return $"「{input.Label}」の音を同じデバイス「{outputs[output].Label}」へ送っているため、ハウリングする可能性があります。";
+                }
+            }
+        }
+    }
+
+    private bool[] GetRouting(int channelIndex)
+    {
+        var routing = new bool[OutputCount];
+        var saved = false;
+        for (var i = 0; i < OutputCount; i++)
+        {
+            routing[i] = _settings.InputRouting[channelIndex * OutputCount + i];
+            saved |= routing[i];
+        }
+
+        if (!saved)
+        {
+            routing[0] = true;
+        }
+
+        return routing;
+    }
+
+    private static AudioDeviceOption ResolveDevice(AudioDeviceOption[] options, string? savedId, string? defaultId)
+    {
+        if (savedId is not null)
+        {
+            return options.FirstOrDefault(option => option.Id == savedId) ?? options[0];
+        }
+
+        if (!string.IsNullOrEmpty(defaultId))
+        {
+            var match = options.FirstOrDefault(option => option.Id == defaultId);
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        return options[0];
+    }
+
+    private static string?[] PickVirtualDefaults(AudioDeviceOption[] renderOptions, string? defaultRenderId)
+    {
+        var used = new HashSet<string?>();
+        var result = new string?[VirtualInputCount];
+
+        result[0] = defaultRenderId ?? renderOptions.Skip(1).Select(option => option.Id).FirstOrDefault();
+        used.Add(result[0]);
+
+        result[1] = FirstMatching(renderOptions, used, "CABLE Input")
+            ?? renderOptions.Skip(1).Select(option => option.Id).FirstOrDefault(id => !used.Contains(id));
+        used.Add(result[1]);
+
+        result[2] = FirstMatching(renderOptions, used, "Voicemeeter Input")
+            ?? renderOptions.Skip(1).Select(option => option.Id).FirstOrDefault(id => !used.Contains(id));
+
+        return result;
+    }
+
+    private static string?[] PickOutputDefaults(AudioDeviceOption[] renderOptions, string? defaultRenderId)
+    {
+        var used = new HashSet<string?>();
+        var result = new string?[OutputCount];
+
+        result[0] = defaultRenderId ?? renderOptions.Skip(1).Select(option => option.Id).FirstOrDefault();
+        used.Add(result[0]);
+
+        result[1] = FirstMatching(renderOptions, used, "CABLE Input");
+        used.Add(result[1]);
+
+        result[2] = renderOptions.Skip(1).Select(option => option.Id).FirstOrDefault(id => !used.Contains(id));
+        used.Add(result[2]);
+
+        result[3] = renderOptions.Skip(1).Select(option => option.Id).FirstOrDefault(id => !used.Contains(id));
+        return result;
+    }
+
+    private static string? FirstMatching(AudioDeviceOption[] options, HashSet<string?> used, string keyword) =>
+        options.FirstOrDefault(option => option.Id.Length > 0 && !used.Contains(option.Id) &&
+                                         option.Name.Contains(keyword, StringComparison.OrdinalIgnoreCase))?.Id;
+
+    private string? GetDefaultDeviceId(DataFlow dataFlow, Role role)
+    {
+        try
+        {
+            using var device = _deviceEnumerator.GetDefaultAudioEndpoint(dataFlow, role);
+            return device.ID;
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error($"既定の{dataFlow}デバイスを取得できませんでした。", exception);
+            return null;
+        }
+    }
+
+    private void SaveMixerSettings()
+    {
+        for (var i = 0; i < HardwareInputCount; i++)
+        {
+            _settings.HardwareInputIds[i] = ToSavedId(_channelRows[i].SelectedDevice);
+        }
+
+        for (var i = 0; i < VirtualInputCount; i++)
+        {
+            _settings.VirtualInputIds[i] = ToSavedId(_channelRows[HardwareInputCount + i].SelectedDevice);
+        }
+
+        for (var i = 0; i < OutputCount; i++)
+        {
+            _settings.HardwareOutputIds[i] = ToSavedId(_outputRows[i].SelectedDevice);
+        }
+
+        for (var channel = 0; channel < ChannelCount; channel++)
+        {
+            _settings.InputVolumes[channel] = _channelRows[channel].Volume;
+            for (var output = 0; output < OutputCount; output++)
+            {
+                _settings.InputRouting[channel * OutputCount + output] = _channelRows[channel].Routing[output];
+            }
+        }
+
+        _settings.Save();
+    }
+
+    private static string? ToSavedId(AudioDeviceOption? option) =>
+        option is null ? null : option.Id.Length == 0 ? string.Empty : option.Id;
 
     private void MixerTab_Checked(object sender, RoutedEventArgs e)
     {
@@ -141,32 +361,6 @@ public partial class MainWindow : Window
         {
             SettingsNavList.SelectedIndex = 0;
         }
-    }
-
-    private string? GetDefaultDeviceId(DataFlow dataFlow, Role role)
-    {
-        try
-        {
-            using var device = _deviceEnumerator.GetDefaultAudioEndpoint(dataFlow, role);
-            return device.ID;
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error($"既定の{dataFlow}デバイスを取得できませんでした。", exception);
-            return null;
-        }
-    }
-
-    private static AudioDeviceOption? PickOutputDevice(AudioDeviceOption[] renderDevices, string? systemAudioDeviceId)
-    {
-        var candidates = renderDevices
-            .Where(device => !string.Equals(device.Id, systemAudioDeviceId, StringComparison.Ordinal))
-            .ToArray();
-
-        return candidates.FirstOrDefault(device => device.Name.Contains("CABLE Input", StringComparison.OrdinalIgnoreCase))
-            ?? candidates.FirstOrDefault(device => device.Name.Contains("Voicemeeter Input", StringComparison.OrdinalIgnoreCase))
-            ?? candidates.FirstOrDefault()
-            ?? renderDevices.FirstOrDefault();
     }
 
     private void SettingsNavList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -208,6 +402,141 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ChannelDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isInitializingUi)
+        {
+            return;
+        }
+
+        SaveMixerSettings();
+        if (_mixer is not null)
+        {
+            StatusText.Text = "デバイスを変更しました。「停止」してから再度「ミックス開始」で反映されます。";
+        }
+    }
+
+    private void OutputDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isInitializingUi)
+        {
+            return;
+        }
+
+        SaveMixerSettings();
+        if (_mixer is not null)
+        {
+            StatusText.Text = "出力先を変更しました。「停止」してから再度「ミックス開始」で反映されます。";
+        }
+    }
+
+    private void ChannelVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_isInitializingUi || sender is not Slider { DataContext: MixerChannelRow row })
+        {
+            return;
+        }
+
+        _mixer?.SetInputVolume(row.Index, (float)row.Volume);
+        SaveMixerSettings();
+    }
+
+    private void RouteToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isInitializingUi || sender is not ToggleButton { DataContext: MixerChannelRow row } toggle)
+        {
+            return;
+        }
+
+        if (toggle.Tag is not string tag || !int.TryParse(tag, out var outputIndex))
+        {
+            return;
+        }
+
+        _mixer?.SetRouting(row.Index, outputIndex, toggle.IsChecked == true);
+        SaveMixerSettings();
+    }
+
+    private void StartButton_Click(object sender, RoutedEventArgs e)
+    {
+        var inputs = _channelRows
+            .Select(row => new MixerInputDefinition(
+                row.Label,
+                string.IsNullOrEmpty(row.SelectedDevice?.Id) ? null : row.SelectedDevice!.Id,
+                row.IsVirtual,
+                (float)row.Volume,
+                (bool[])row.Routing.Clone()))
+            .ToArray();
+        var outputs = _outputRows
+            .Select(row => new MixerOutputDefinition(
+                row.Label,
+                string.IsNullOrEmpty(row.SelectedDevice?.Id) ? null : row.SelectedDevice!.Id))
+            .ToArray();
+
+        if (outputs.All(output => output.DeviceId is null))
+        {
+            MessageBox.Show("H/W出力を1つ以上選択してください。", "出力が未選択",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (inputs.All(input => input.DeviceId is null))
+        {
+            MessageBox.Show("H/W入力またはバーチャル入力を1つ以上選択してください。", "入力が未選択",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _mixer?.Dispose();
+        _mixer = null;
+
+        var warnings = FindFeedbackLoops(inputs, outputs).ToList();
+
+        try
+        {
+            _mixer = new MixerEngine(inputs, outputs, _settings.OutputLatencyMs);
+            _mixer.Start();
+
+            StartButton.IsEnabled = false;
+            StopButton.IsEnabled = true;
+
+            warnings.AddRange(_mixer.StartupIssues);
+            StatusText.Text = warnings.Count == 0
+                ? $"ミックス中です（出力 {_mixer.ActiveOutputCount} 件）。"
+                : $"ミックス中です（出力 {_mixer.ActiveOutputCount} 件 / 警告 {warnings.Count} 件）。";
+
+            if (warnings.Count > 0)
+            {
+                MessageBox.Show(
+                    string.Join(Environment.NewLine, warnings) + $"{Environment.NewLine}{Environment.NewLine}ログ: {AppPaths.LogDirectory}",
+                    "確認してください",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+        }
+        catch (Exception exception)
+        {
+            _mixer?.Dispose();
+            _mixer = null;
+            StartButton.IsEnabled = true;
+            StopButton.IsEnabled = false;
+            AppLog.Error("音声の開始に失敗しました。", exception);
+
+            MessageBox.Show($"{exception.Message}{Environment.NewLine}{Environment.NewLine}ログ: {AppPaths.LogDirectory}",
+                "音声を開始できません", MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusText.Text = "音声を開始できませんでした。設定タブのログフォルダで詳細を確認できます。";
+        }
+    }
+
+    private void StopButton_Click(object sender, RoutedEventArgs e)
+    {
+        _mixer?.Dispose();
+        _mixer = null;
+        StartButton.IsEnabled = true;
+        StopButton.IsEnabled = false;
+        StatusText.Text = "停止しました。";
+    }
+
     private void OpenUpdateSettings_Click(object sender, RoutedEventArgs e)
     {
         SettingsTabButton.IsChecked = true;
@@ -230,11 +559,12 @@ public partial class MainWindow : Window
 
         try
         {
-            var latest = await _updateService.GetLatestAsync(CancellationToken.None);
+            _releases = await _updateService.GetReleasesAsync(CancellationToken.None);
             _settings.LastUpdateCheckUtc = DateTime.UtcNow;
             _settings.Save();
+            UpdateReleaseHistory();
 
-            if (latest is null)
+            if (_releases.Count == 0)
             {
                 _availableRelease = null;
                 UpdateActionsPanel.Visibility = Visibility.Collapsed;
@@ -243,6 +573,7 @@ public partial class MainWindow : Window
                 return;
             }
 
+            var latest = _releases[0];
             if (VersionComparer.Compare(latest.Version, AppInfo.Version) > 0)
             {
                 _availableRelease = latest;
@@ -259,7 +590,7 @@ public partial class MainWindow : Window
                 _availableRelease = null;
                 UpdateActionsPanel.Visibility = Visibility.Collapsed;
                 UpdateBanner.Visibility = Visibility.Collapsed;
-                SetUpdateStatus($"最新です（{AppInfo.DisplayVersion}）。");
+                SetUpdateStatus($"最新です（{AppInfo.DisplayVersion}）。過去のリリースは下に表示しています。");
             }
         }
         catch (Exception exception)
@@ -276,6 +607,28 @@ public partial class MainWindow : Window
         }
     }
 
+    private void UpdateReleaseHistory()
+    {
+        var items = _releases
+            .Select(release => new ReleaseHistoryItem(
+                release.IsPrerelease ? $"{release.TagName}（プレリリース）" : release.TagName,
+                release.Name,
+                release.PublishedAt is null ? string.Empty : release.PublishedAt.Value.ToLocalTime().ToString("yyyy/MM/dd"),
+                release.HtmlUrl))
+            .ToArray();
+
+        ReleaseHistoryList.ItemsSource = items;
+        ReleaseHistoryEmptyText.Visibility = items.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ReleaseHistoryItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string url } && !string.IsNullOrWhiteSpace(url))
+        {
+            OpenUrl(url);
+        }
+    }
+
     private async void InstallUpdateButton_Click(object sender, RoutedEventArgs e)
     {
         if (_availableRelease is null || _isUpdating)
@@ -284,7 +637,7 @@ public partial class MainWindow : Window
         }
 
         var answer = MessageBox.Show(
-            $"{_availableRelease.TagName} にアップデートします。\nダウンロード後にインストーラーが起動し、PulseWeaver は終了します。よろしいですか？",
+            $"{_availableRelease.TagName} にアップデートします。{Environment.NewLine}ダウンロード後にインストーラーが起動し、PulseWeaver は終了します。よろしいですか？",
             "アップデートの確認",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -342,72 +695,6 @@ public partial class MainWindow : Window
         {
             AppLog.Error("ログフォルダを開けませんでした。", exception);
         }
-    }
-
-    private void StartButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (SystemAudioDeviceCombo.SelectedItem is not AudioDeviceOption systemAudio ||
-            MicrophoneDeviceCombo.SelectedItem is not AudioDeviceOption microphone ||
-            OutputDeviceCombo.SelectedItem is not AudioDeviceOption output)
-        {
-            MessageBox.Show("システム音声、マイク、出力の各デバイスを選択してください。",
-                "デバイス未選択", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        if (systemAudio.Id == output.Id)
-        {
-            MessageBox.Show("入力ループやハウリングを避けるため、システム音声入力とミックス出力には別のデバイスを選んでください。",
-                "デバイスの重複", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        _mixer?.Dispose();
-        _mixer = null;
-
-        try
-        {
-            _mixer = new MixerEngine(systemAudio.Id, microphone.Id, output.Id, _settings.OutputLatencyMs);
-            _mixer.SetVolumes((float)SystemVolumeSlider.Value, (float)MicrophoneVolumeSlider.Value);
-            _mixer.Start();
-
-            StartButton.IsEnabled = false;
-            StopButton.IsEnabled = true;
-            StatusText.Text = "ミックス中です。Discord の入力デバイスに選択した仮想デバイスを指定してください。";
-        }
-        catch (Exception exception)
-        {
-            _mixer?.Dispose();
-            _mixer = null;
-            StartButton.IsEnabled = true;
-            StopButton.IsEnabled = false;
-            AppLog.Error("音声の開始に失敗しました。", exception);
-
-            MessageBox.Show($"{exception.Message}\n\nログ: {AppPaths.LogDirectory}",
-                "音声を開始できません", MessageBoxButton.OK, MessageBoxImage.Error);
-            StatusText.Text = "音声を開始できませんでした。設定タブのログフォルダで詳細を確認できます。";
-        }
-    }
-
-    private void StopButton_Click(object sender, RoutedEventArgs e)
-    {
-        _mixer?.Dispose();
-        _mixer = null;
-        StartButton.IsEnabled = true;
-        StopButton.IsEnabled = false;
-        StatusText.Text = "停止しました。";
-    }
-
-    private void VolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (SystemVolumeLabel is null || MicrophoneVolumeLabel is null)
-        {
-            return;
-        }
-
-        SystemVolumeLabel.Text = $"{SystemVolumeSlider.Value:P0}";
-        MicrophoneVolumeLabel.Text = $"{MicrophoneVolumeSlider.Value:P0}";
-        _mixer?.SetVolumes((float)SystemVolumeSlider.Value, (float)MicrophoneVolumeSlider.Value);
     }
 
     private void SetUpdateStatus(string message) => UpdateStatusText.Text = message;

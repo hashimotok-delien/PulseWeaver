@@ -4,27 +4,70 @@ using NAudio.Wave.SampleProviders;
 
 namespace PulseWeaver;
 
+internal sealed record MixerInputDefinition(string Label, string? DeviceId, bool IsLoopback, float Volume, bool[] Routing);
+
+internal sealed record MixerOutputDefinition(string Label, string? DeviceId);
+
 internal sealed class MixerEngine : IDisposable
 {
     internal const int InternalSampleRate = 48_000;
 
-    private MMDeviceEnumerator? _deviceEnumerator;
-    private MMDevice? _systemAudioDevice;
-    private MMDevice? _microphoneDevice;
-    private MMDevice? _outputDevice;
-    private WasapiLoopbackCapture? _systemAudioCapture;
-    private WasapiCapture? _microphoneCapture;
-    private WasapiOut? _output;
-    private VolumeSampleProvider? _systemVolume;
-    private VolumeSampleProvider? _microphoneVolume;
+    private readonly MMDeviceEnumerator _deviceEnumerator = new();
+    private readonly List<MMDevice> _devices = new();
+    private readonly List<string> _startupIssues = new();
+    private readonly InputSource?[] _inputs;
+    private readonly OutputTarget?[] _outputTargets;
     private bool _started;
     private bool _disposed;
 
-    public MixerEngine(string systemAudioDeviceId, string microphoneDeviceId, string outputDeviceId, int outputLatencyMs = 100)
+    public MixerEngine(IReadOnlyList<MixerInputDefinition> inputs, IReadOnlyList<MixerOutputDefinition> outputs, int outputLatencyMs = 100)
     {
+        _inputs = new InputSource?[inputs.Count];
+        _outputTargets = new OutputTarget?[outputs.Count];
+
         try
         {
-            Initialize(systemAudioDeviceId, microphoneDeviceId, outputDeviceId, outputLatencyMs);
+            for (var i = 0; i < outputs.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(outputs[i].DeviceId))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var device = OpenDevice(outputs[i].DeviceId!);
+                    _outputTargets[i] = new OutputTarget
+                    {
+                        Label = outputs[i].Label,
+                        Device = device,
+                        MixFormat = device.AudioClient.MixFormat
+                    };
+                }
+                catch (Exception exception)
+                {
+                    AddIssue($"{outputs[i].Label} を開けませんでした。{AudioErrorDescriber.Describe(exception)}");
+                }
+            }
+
+            for (var i = 0; i < inputs.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(inputs[i].DeviceId))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    _inputs[i] = CreateInput(inputs[i]);
+                }
+                catch (Exception exception)
+                {
+                    AddIssue($"{inputs[i].Label} を開けませんでした。{AudioErrorDescriber.Describe(exception)}");
+                }
+            }
+
+            BuildOutputs(outputLatencyMs);
         }
         catch (Exception exception)
         {
@@ -38,6 +81,10 @@ internal sealed class MixerEngine : IDisposable
         }
     }
 
+    public IReadOnlyList<string> StartupIssues => _startupIssues;
+
+    public int ActiveOutputCount => _outputTargets.Count(target => target?.Output is not null);
+
     public void Start()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -46,122 +93,201 @@ internal sealed class MixerEngine : IDisposable
             return;
         }
 
-        try
+        foreach (var input in _inputs.OfType<InputSource>())
         {
-            _systemAudioCapture!.StartRecording();
-            _microphoneCapture!.StartRecording();
-            _output!.Play();
-            _started = true;
-            AppLog.Info("ミックスを開始しました。");
-        }
-        catch (Exception exception)
-        {
-            throw new AudioStartupException($"音声ストリームを開始できませんでした。{AudioErrorDescriber.Describe(exception)}", exception);
-        }
-    }
-
-    public void SetVolumes(float systemAudio, float microphone)
-    {
-        if (_systemVolume is not null)
-        {
-            _systemVolume.Volume = Math.Clamp(systemAudio, 0f, 1f);
+            try
+            {
+                input.Capture.StartRecording();
+            }
+            catch (Exception exception)
+            {
+                AddIssue($"{input.Label} の録音を開始できませんでした。{AudioErrorDescriber.Describe(exception)}");
+            }
         }
 
-        if (_microphoneVolume is not null)
+        var startedOutputs = 0;
+        foreach (var target in _outputTargets.OfType<OutputTarget>())
         {
-            _microphoneVolume.Volume = Math.Clamp(microphone, 0f, 1f);
+            if (target.Output is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                target.Output.Play();
+                startedOutputs++;
+            }
+            catch (Exception exception)
+            {
+                AddIssue($"{target.Label} の再生を開始できませんでした。{AudioErrorDescriber.Describe(exception)}");
+            }
         }
-    }
 
-    private void Initialize(string systemAudioDeviceId, string microphoneDeviceId, string outputDeviceId, int outputLatencyMs)
-    {
-        _deviceEnumerator = new MMDeviceEnumerator();
-        _systemAudioDevice = OpenDevice(systemAudioDeviceId, "システム音声（ループバック元）");
-        _microphoneDevice = OpenDevice(microphoneDeviceId, "マイク");
-        _outputDevice = OpenDevice(outputDeviceId, "ミックス出力");
-
-        _systemAudioCapture = CreateCapture(() => new WasapiLoopbackCapture(_systemAudioDevice), "システム音声（ループバック元）");
-        _microphoneCapture = CreateCapture(() => new WasapiCapture(_microphoneDevice), "マイク");
-
-        var systemAudioBuffer = AttachBuffer(_systemAudioCapture, "システム音声");
-        var microphoneBuffer = AttachBuffer(_microphoneCapture, "マイク");
-
-        _systemVolume = new VolumeSampleProvider(CreateInputChain(systemAudioBuffer, "システム音声"));
-        _microphoneVolume = new VolumeSampleProvider(CreateInputChain(microphoneBuffer, "マイク"));
-
-        var mixer = new MixingSampleProvider(new ISampleProvider[] { _systemVolume, _microphoneVolume })
-        {
-            ReadFully = true
-        };
-
-        var outputFormat = GetOutputFormat(_outputDevice);
-        try
-        {
-            _output = new WasapiOut(_outputDevice, AudioClientShareMode.Shared, true, Math.Clamp(outputLatencyMs, 20, 500));
-            _output.Init(CreateOutputWaveProvider(mixer, outputFormat));
-        }
-        catch (Exception exception)
+        if (startedOutputs == 0)
         {
             throw new AudioStartupException(
-                $"出力デバイス「{_outputDevice.FriendlyName}」を開けませんでした。{AudioErrorDescriber.Describe(exception)}",
-                exception);
+                $"音声出力を開始できませんでした。{string.Join(" / ", _startupIssues)}",
+                new InvalidOperationException("起動できた出力デバイスがありません。"));
         }
 
-        AppLog.Info(
-            $"ミキサー初期化: システム音声={_systemAudioDevice.FriendlyName} ({_systemAudioCapture.WaveFormat}), " +
-            $"マイク={_microphoneDevice.FriendlyName} ({_microphoneCapture.WaveFormat}), " +
-            $"出力={_outputDevice.FriendlyName} ({outputFormat}), 遅延={outputLatencyMs}ms");
+        _started = true;
+        AppLog.Info($"ミックスを開始しました（入力 {_inputs.Count(input => input is not null)} 件 / 出力 {startedOutputs} 件）。");
     }
 
-    private MMDevice OpenDevice(string deviceId, string label)
+    public void SetInputVolume(int inputIndex, float volume)
     {
+        if (inputIndex < 0 || inputIndex >= _inputs.Length || _inputs[inputIndex] is not { } input)
+        {
+            return;
+        }
+
+        input.Volume = Math.Clamp(volume, 0f, 1f);
+        ApplyGains(input);
+    }
+
+    public void SetRouting(int inputIndex, int outputIndex, bool enabled)
+    {
+        if (inputIndex < 0 || inputIndex >= _inputs.Length || _inputs[inputIndex] is not { } input)
+        {
+            return;
+        }
+
+        if (outputIndex < 0 || outputIndex >= input.Routing.Length)
+        {
+            return;
+        }
+
+        input.Routing[outputIndex] = enabled;
+        ApplyGains(input);
+    }
+
+    private static void ApplyGains(InputSource input)
+    {
+        for (var i = 0; i < input.Gains.Length; i++)
+        {
+            if (input.Gains[i] is { } gain)
+            {
+                gain.Volume = input.Routing[i] ? input.Volume : 0f;
+            }
+        }
+    }
+
+    private InputSource CreateInput(MixerInputDefinition definition)
+    {
+        var device = OpenDevice(definition.DeviceId!);
+        WasapiCapture capture;
         try
         {
-            return _deviceEnumerator!.GetDevice(deviceId);
+            capture = definition.IsLoopback
+                ? new WasapiLoopbackCapture(device)
+                : new WasapiCapture(device);
         }
         catch (Exception exception)
         {
-            throw new AudioStartupException(
-                $"{label}が見つかりません。デバイスを接続し直して選択してください。{AudioErrorDescriber.Describe(exception)}",
-                exception);
+            throw new AudioStartupException($"{definition.Label} を開けませんでした。{AudioErrorDescriber.Describe(exception)}", exception);
         }
-    }
 
-    private static T CreateCapture<T>(Func<T> factory, string label)
-        where T : WasapiCapture
-    {
-        try
+        var buffers = new BufferedWaveProvider?[_outputTargets.Length];
+        for (var i = 0; i < _outputTargets.Length; i++)
         {
-            return factory();
-        }
-        catch (Exception exception)
-        {
-            throw new AudioStartupException($"{label}を開けませんでした。{AudioErrorDescriber.Describe(exception)}", exception);
-        }
-    }
+            if (_outputTargets[i] is null)
+            {
+                continue;
+            }
 
-    private static BufferedWaveProvider AttachBuffer(WasapiCapture capture, string label)
-    {
-        var buffer = new BufferedWaveProvider(capture.WaveFormat)
+            buffers[i] = new BufferedWaveProvider(capture.WaveFormat)
+            {
+                BufferDuration = TimeSpan.FromSeconds(2),
+                DiscardOnBufferOverflow = true,
+                ReadFully = true
+            };
+        }
+
+        capture.DataAvailable += (_, args) =>
         {
-            BufferDuration = TimeSpan.FromSeconds(2),
-            DiscardOnBufferOverflow = true,
-            ReadFully = true
+            foreach (var buffer in buffers)
+            {
+                buffer?.AddSamples(args.Buffer, 0, args.BytesRecorded);
+            }
         };
-
-        capture.DataAvailable += (_, args) => buffer.AddSamples(args.Buffer, 0, args.BytesRecorded);
         capture.RecordingStopped += (_, args) =>
         {
             if (args.Exception is not null)
             {
-                AppLog.Error($"{label}の録音が停止しました。", args.Exception);
+                AppLog.Error($"{definition.Label} の録音が停止しました。", args.Exception);
             }
         };
 
-        return buffer;
+        var gains = new VolumeSampleProvider?[buffers.Length];
+        for (var i = 0; i < buffers.Length; i++)
+        {
+            if (buffers[i] is { } buffer)
+            {
+                gains[i] = new VolumeSampleProvider(CreateInternalChain(buffer));
+            }
+        }
+
+        var input = new InputSource
+        {
+            Label = definition.Label,
+            Capture = capture,
+            Buffers = buffers,
+            Gains = gains,
+            Volume = Math.Clamp(definition.Volume, 0f, 1f),
+            Routing = definition.Routing.Length == buffers.Length ? definition.Routing : new bool[buffers.Length]
+        };
+
+        ApplyGains(input);
+        AppLog.Info($"{definition.Label} の入力形式: {capture.WaveFormat}");
+        return input;
     }
 
-    private static ISampleProvider CreateInputChain(BufferedWaveProvider buffer, string label)
+    private void BuildOutputs(int outputLatencyMs)
+    {
+        for (var i = 0; i < _outputTargets.Length; i++)
+        {
+            if (_outputTargets[i] is not { } target)
+            {
+                continue;
+            }
+
+            var gains = _inputs
+                .OfType<InputSource>()
+                .Select(input => input.Gains[i])
+                .Where(gain => gain is not null)
+                .Select(gain => gain!)
+                .ToArray();
+
+            if (gains.Length == 0)
+            {
+                AddIssue($"{target.Label} に送る入力がありません。");
+                continue;
+            }
+
+            try
+            {
+                var mixer = new MixingSampleProvider(gains) { ReadFully = true };
+                var output = new WasapiOut(target.Device, AudioClientShareMode.Shared, true, Math.Clamp(outputLatencyMs, 20, 500));
+                output.Init(CreateOutputWaveProvider(mixer, target.MixFormat));
+                target.Output = output;
+                AppLog.Info($"{target.Label} の出力: {target.Device.FriendlyName} ({target.MixFormat}), 入力 {gains.Length} 件");
+            }
+            catch (Exception exception)
+            {
+                AddIssue($"{target.Label} を開けませんでした。{AudioErrorDescriber.Describe(exception)}");
+            }
+        }
+    }
+
+    private MMDevice OpenDevice(string deviceId)
+    {
+        var device = _deviceEnumerator.GetDevice(deviceId);
+        _devices.Add(device);
+        return device;
+    }
+
+    private static ISampleProvider CreateInternalChain(BufferedWaveProvider buffer)
     {
         var provider = buffer.ToSampleProvider();
         if (provider.WaveFormat.Channels == 1)
@@ -178,22 +304,7 @@ internal sealed class MixerEngine : IDisposable
             provider = new WdlResamplingSampleProvider(provider, InternalSampleRate);
         }
 
-        AppLog.Info($"{label}の入力形式: {buffer.WaveFormat.Encoding} {buffer.WaveFormat.SampleRate}Hz {buffer.WaveFormat.Channels}ch -> 48kHz float stereo");
         return provider;
-    }
-
-    private static WaveFormat GetOutputFormat(MMDevice device)
-    {
-        try
-        {
-            return device.AudioClient.MixFormat;
-        }
-        catch (Exception exception)
-        {
-            throw new AudioStartupException(
-                $"出力デバイス「{device.FriendlyName}」の音声形式を取得できませんでした。{AudioErrorDescriber.Describe(exception)}",
-                exception);
-        }
     }
 
     private static IWaveProvider CreateOutputWaveProvider(ISampleProvider mixer, WaveFormat outputFormat)
@@ -222,6 +333,12 @@ internal sealed class MixerEngine : IDisposable
             : new SampleToWaveProvider16(provider);
     }
 
+    private void AddIssue(string message)
+    {
+        _startupIssues.Add(message);
+        AppLog.Info($"[警告] {message}");
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -230,26 +347,59 @@ internal sealed class MixerEngine : IDisposable
         }
 
         _disposed = true;
-        try
+
+        foreach (var target in _outputTargets.OfType<OutputTarget>())
         {
-            if (_started)
+            try
             {
-                _systemAudioCapture?.StopRecording();
-                _microphoneCapture?.StopRecording();
-                _output?.Stop();
+                target.Output?.Stop();
             }
-        }
-        catch (Exception exception)
-        {
-            AppLog.Error("音声ストリームの停止に失敗しました。", exception);
+            catch (Exception exception)
+            {
+                AppLog.Error($"{target.Label} の停止に失敗しました。", exception);
+            }
+
+            target.Output?.Dispose();
         }
 
-        _output?.Dispose();
-        _systemAudioCapture?.Dispose();
-        _microphoneCapture?.Dispose();
-        _systemAudioDevice?.Dispose();
-        _microphoneDevice?.Dispose();
-        _outputDevice?.Dispose();
-        _deviceEnumerator?.Dispose();
+        foreach (var input in _inputs.OfType<InputSource>())
+        {
+            try
+            {
+                input.Capture.StopRecording();
+            }
+            catch (Exception exception)
+            {
+                AppLog.Error($"{input.Label} の録音停止に失敗しました。", exception);
+            }
+
+            input.Capture.Dispose();
+        }
+
+        foreach (var device in _devices)
+        {
+            device.Dispose();
+        }
+
+        _devices.Clear();
+        _deviceEnumerator.Dispose();
+    }
+
+    private sealed class InputSource
+    {
+        public required string Label { get; init; }
+        public required WasapiCapture Capture { get; init; }
+        public required BufferedWaveProvider?[] Buffers { get; init; }
+        public required VolumeSampleProvider?[] Gains { get; init; }
+        public required bool[] Routing { get; init; }
+        public float Volume { get; set; }
+    }
+
+    private sealed class OutputTarget
+    {
+        public required string Label { get; init; }
+        public required MMDevice Device { get; init; }
+        public required WaveFormat MixFormat { get; init; }
+        public WasapiOut? Output { get; set; }
     }
 }

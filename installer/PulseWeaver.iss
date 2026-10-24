@@ -23,6 +23,7 @@ UninstallDisplayIcon={app}\{#AppExeName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
+SetupIconFile=..\PulseWeaver\Assets\PulseWeaver.ico
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist

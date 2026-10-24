@@ -13,6 +13,16 @@ internal sealed class AppSettings
 
     public DateTime? LastUpdateCheckUtc { get; set; }
 
+    public string?[] HardwareInputIds { get; set; } = new string?[6];
+
+    public string?[] VirtualInputIds { get; set; } = new string?[3];
+
+    public string?[] HardwareOutputIds { get; set; } = new string?[4];
+
+    public double[] InputVolumes { get; set; } = Enumerable.Repeat(0.8, 9).ToArray();
+
+    public bool[] InputRouting { get; set; } = new bool[9 * 4];
+
     public static TimeSpan AutoCheckInterval { get; } = TimeSpan.FromHours(24);
 
     public static AppSettings Load()
@@ -22,7 +32,9 @@ internal sealed class AppSettings
             if (File.Exists(AppPaths.SettingsFile))
             {
                 var json = File.ReadAllText(AppPaths.SettingsFile);
-                return JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+                var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+                settings.EnsureShape();
+                return settings;
             }
         }
         catch (Exception exception)
@@ -47,5 +59,33 @@ internal sealed class AppSettings
         {
             AppLog.Error("設定の保存に失敗しました。", exception);
         }
+    }
+
+    public void EnsureShape()
+    {
+        HardwareInputIds = Resize(HardwareInputIds, 6);
+        VirtualInputIds = Resize(VirtualInputIds, 3);
+        HardwareOutputIds = Resize(HardwareOutputIds, 4);
+
+        if (InputVolumes.Length != 9)
+        {
+            InputVolumes = Enumerable.Repeat(0.8, 9).ToArray();
+        }
+
+        if (InputRouting.Length != 9 * 4)
+        {
+            InputRouting = new bool[9 * 4];
+        }
+    }
+
+    private static string?[] Resize(string?[]? values, int length)
+    {
+        var result = new string?[length];
+        if (values is not null)
+        {
+            Array.Copy(values, result, Math.Min(values.Length, length));
+        }
+
+        return result;
     }
 }
