@@ -1,0 +1,151 @@
+name: Release PulseWeaver
+
+#
+# 使い方:
+#   1) タグ push でリリース: git tag v0.1.0 && git push origin v0.1.0
+#   2) 手動実行（Actions > Release PulseWeaver > Run workflow）でバージョンを入力
+#
+# 出力:
+#   - PulseWeaver-win-x64.zip             … Windows x64 自己完結ポータブル版
+#   - SHA256SUMS.txt
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'リリースするバージョン（例: 0.2.0）'
+        required: false
+        type: string
+      prerelease:
+        description: 'プレリリースとして公開する'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  PROJECT: PulseWeaver/PulseWeaver.csproj
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: 1. Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 2. Determine version
+        id: version
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:EVENT_NAME -eq 'push') {
+            $version = $env:REF_NAME -replace '^v', ''
+          }
+          elseif (-not [string]::IsNullOrWhiteSpace($env:INPUT_VERSION)) {
+            $version = $env:INPUT_VERSION -replace '^v', ''
+          }
+          else {
+            $version = '0.1.0'
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "不正なバージョンです: $version (例: 0.1.0 または 0.2.0-rc.1)"
+          }
+
+          "value=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version"  >> $env:GITHUB_OUTPUT
+          Write-Host "リリースバージョン: v$version"
+
+      - name: 3. Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 4. Publish self-contained app and create ZIP
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $publishDir = 'dist\publish'
+          New-Item -ItemType Directory -Path $publishDir -Force | Out-Null
+          dotnet publish $env:PROJECT `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:Version=$env:VERSION `
+            --output $publishDir
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish に失敗しました。' }
+          if (-not (Test-Path "$publishDir\PulseWeaver.exe")) {
+            throw '発行された PulseWeaver.exe が見つかりません。'
+          }
+
+          Copy-Item README.md $publishDir
+          Compress-Archive -Path "$publishDir\*" -DestinationPath 'dist\PulseWeaver-win-x64.zip' -Force
+          if (-not (Test-Path 'dist\PulseWeaver-win-x64.zip')) {
+            throw '配布 ZIP の作成に失敗しました。'
+          }
+          Get-ChildItem dist -File | Select-Object Name, Length | Format-Table | Out-String | Write-Host
+
+      - name: 5. Checksums
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $files = @(Get-ChildItem -Path 'dist\PulseWeaver-win-x64.zip' -File -ErrorAction SilentlyContinue)
+          if ($files.Count -eq 0) {
+            throw 'チェックサム対象のファイルが見つかりません（ビルドに失敗しています）。'
+          }
+
+          $lines = $files | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          }
+          $lines | Out-File -FilePath 'dist\SHA256SUMS.txt' -Encoding ascii
+          $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding ascii -Append
+
+          $size = (Get-Item 'dist\SHA256SUMS.txt').Length
+          Write-Host "SHA256SUMS.txt: $size バイト / $($files.Count) 件"
+          if ($size -le 0) { throw 'SHA256SUMS.txt が空です。' }
+          Get-Content 'dist\SHA256SUMS.txt'
+
+      - name: 6. Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: PulseWeaver v${{ steps.version.outputs.value }}
+          generate_release_notes: true
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
+          body: |
+            ## ダウンロード
+
+            `PulseWeaver-win-x64.zip` を展開し、`PulseWeaver.exe` を実行してください。
+
+            **動作要件**: Windows 10/11 x64。アプリは自己完結型のため、.NET ランタイムの別途インストールは不要です。
+            Discordへミックス音声を送るには、VB-CABLE などの仮想オーディオデバイスを別途インストールしてください。
+
+            > このアプリはコード署名されていないため、SmartScreen の警告が表示される場合があります。
+
+            `SHA256SUMS.txt` でダウンロードしたファイルを検証できます。
+          files: |
+            dist/PulseWeaver-win-x64.zip
+            dist/SHA256SUMS.txt
+          fail_on_unmatched_files: true
