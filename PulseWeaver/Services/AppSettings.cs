@@ -19,6 +19,10 @@ internal sealed class AppSettings
 
     public string?[] HardwareOutputIds { get; set; } = new string?[4];
 
+    public string?[] InputNames { get; set; } = new string?[9];
+
+    public string?[] OutputNames { get; set; } = new string?[4];
+
     public double[] InputVolumes { get; set; } = Enumerable.Repeat(0.8, 9).ToArray();
 
     public bool[] InputRouting { get; set; } = new bool[9 * 4];
@@ -66,6 +70,8 @@ internal sealed class AppSettings
         HardwareInputIds = Resize(HardwareInputIds, 6);
         VirtualInputIds = Resize(VirtualInputIds, 3);
         HardwareOutputIds = Resize(HardwareOutputIds, 4);
+        InputNames = Resize(InputNames, 9);
+        OutputNames = Resize(OutputNames, 4);
 
         if (InputVolumes.Length != 9)
         {

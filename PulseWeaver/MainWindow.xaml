@@ -160,6 +160,33 @@
             </Setter>
         </Style>
 
+        <Style x:Key="NameBox" TargetType="TextBox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="#F1F5F9"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="CaretBrush" Value="#4F7DFF"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="4"
+                                Padding="5,2" Margin="-5,-2">
+                            <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#232B3A"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#232B3A"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <DataTemplate x:Key="ChannelRowTemplate">
             <Grid Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
@@ -170,14 +197,14 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
-                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                    <TextBlock Text="{Binding KindLabel}" Foreground="#7D8AA0" FontSize="11"/>
+                    <TextBox Style="{StaticResource NameBox}" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="クリックして名前を変更できます"/>
+                    <TextBlock Text="{Binding KindLabel}" Foreground="#7D8AA0" FontSize="11" Margin="0,1,0,0"/>
                 </StackPanel>
 
                 <ComboBox Grid.Column="1" ItemsSource="{Binding Options}"
                           SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
-                          DisplayMemberPath="Name" Height="30" VerticalAlignment="Center"
-                          SelectionChanged="ChannelDevice_SelectionChanged"/>
+                          DisplayMemberPath="Name" Height="30" VerticalAlignment="Center"/>
 
                 <Grid Grid.Column="2" Margin="12,0,4,0">
                     <Grid.ColumnDefinitions>
@@ -185,21 +212,21 @@
                         <ColumnDefinition Width="44"/>
                     </Grid.ColumnDefinitions>
                     <Slider Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}"
-                            VerticalAlignment="Center" ValueChanged="ChannelVolume_ValueChanged"/>
+                            VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1" Text="{Binding Volume, StringFormat=P0}"
                                TextAlignment="Right" VerticalAlignment="Center"
                                Foreground="#A8B3C5" FontSize="11"/>
                 </Grid>
 
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A1" Tag="0"
-                                  IsChecked="{Binding Routing[0], Mode=TwoWay}" Click="RouteToggle_Click"/>
-                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A2" Tag="1"
-                                  IsChecked="{Binding Routing[1], Mode=TwoWay}" Click="RouteToggle_Click"/>
-                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A3" Tag="2"
-                                  IsChecked="{Binding Routing[2], Mode=TwoWay}" Click="RouteToggle_Click"/>
-                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A4" Tag="3"
-                                  IsChecked="{Binding Routing[3], Mode=TwoWay}" Click="RouteToggle_Click"/>
+                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A1"
+                                  IsChecked="{Binding RouteA1, Mode=TwoWay}"/>
+                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A2"
+                                  IsChecked="{Binding RouteA2, Mode=TwoWay}"/>
+                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A3"
+                                  IsChecked="{Binding RouteA3, Mode=TwoWay}"/>
+                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A4"
+                                  IsChecked="{Binding RouteA4, Mode=TwoWay}"/>
                 </StackPanel>
             </Grid>
         </DataTemplate>
@@ -211,13 +238,13 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
-                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold"/>
-                    <TextBlock Text="H/W出力" Foreground="#7D8AA0" FontSize="11"/>
+                    <TextBox Style="{StaticResource NameBox}" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="クリックして名前を変更できます"/>
+                    <TextBlock Text="H/W出力" Foreground="#7D8AA0" FontSize="11" Margin="0,1,0,0"/>
                 </StackPanel>
                 <ComboBox Grid.Column="1" ItemsSource="{Binding Options}"
                           SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
-                          DisplayMemberPath="Name" Height="30" VerticalAlignment="Center"
-                          SelectionChanged="OutputDevice_SelectionChanged"/>
+                          DisplayMemberPath="Name" Height="30" VerticalAlignment="Center"/>
             </Grid>
         </DataTemplate>
     </Window.Resources>

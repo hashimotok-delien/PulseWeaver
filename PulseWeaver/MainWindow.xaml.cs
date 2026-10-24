@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
+using System.ComponentModel;
 using NAudio.CoreAudioApi;
 
 namespace PulseWeaver;
@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private IReadOnlyList<UpdateRelease> _releases = Array.Empty<UpdateRelease>();
     private UpdateRelease? _availableRelease;
     private bool _isInitializingUi;
+    private bool _isSyncingRoutes;
     private bool _isApplyingSettings;
     private bool _isCheckingUpdates;
     private bool _isUpdating;
@@ -145,7 +146,7 @@ public partial class MainWindow : Window
                 };
                 var selected = ResolveDevice(captureOptions, _settings.HardwareInputIds[i], defaultId);
                 _channelRows.Add(new MixerChannelRow(i, $"H/W入力 {i + 1}", "H/W入力", false, captureOptions,
-                    selected, _settings.InputVolumes[i], GetRouting(i)));
+                    selected, _settings.InputVolumes[i], GetRouting(i), _settings.InputNames[i]));
             }
 
             for (var i = 0; i < VirtualInputCount; i++)
@@ -153,20 +154,30 @@ public partial class MainWindow : Window
                 var index = HardwareInputCount + i;
                 var selected = ResolveDevice(renderOptions, _settings.VirtualInputIds[i], virtualDefaults[i]);
                 _channelRows.Add(new MixerChannelRow(index, VirtualInputLabels[i], $"バーチャル入力 {i + 1}", true,
-                    renderOptions, selected, _settings.InputVolumes[index], GetRouting(index)));
+                    renderOptions, selected, _settings.InputVolumes[index], GetRouting(index), _settings.InputNames[index]));
             }
 
             for (var i = 0; i < OutputCount; i++)
             {
                 var selected = ResolveDevice(renderOptions, _settings.HardwareOutputIds[i], outputDefaults[i]);
-                _outputRows.Add(new MixerOutputRow(i, $"A{i + 1}", renderOptions, selected));
+                _outputRows.Add(new MixerOutputRow(i, $"A{i + 1}", renderOptions, selected, _settings.OutputNames[i]));
+            }
+
+            foreach (var row in _channelRows)
+            {
+                row.PropertyChanged += ChannelRow_PropertyChanged;
+            }
+
+            foreach (var row in _outputRows)
+            {
+                row.PropertyChanged += OutputRow_PropertyChanged;
             }
 
             HardwareInputList.ItemsSource = _channelRows.Take(HardwareInputCount).ToArray();
             VirtualInputList.ItemsSource = _channelRows.Skip(HardwareInputCount).ToArray();
             HardwareOutputList.ItemsSource = _outputRows.ToArray();
 
-            DisableFeedbackRoutes();
+            SyncFeedbackRoutes();
             SaveMixerSettings();
         }
         finally
@@ -175,19 +186,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void DisableFeedbackRoutes()
-    {
-        foreach (var channel in _channelRows.Where(row => row.IsVirtual && row.SelectedDevice is { } device && device.Id.Length > 0))
-        {
-            for (var output = 0; output < _outputRows.Count; output++)
-            {
-                if (_outputRows[output].SelectedDevice?.Id == channel.SelectedDevice!.Id)
-                {
-                    channel.Routing[output] = false;
-                }
-            }
-        }
-    }
 
     private static IEnumerable<string> FindFeedbackLoops(MixerInputDefinition[] inputs, MixerOutputDefinition[] outputs)
     {
@@ -320,14 +318,16 @@ public partial class MainWindow : Window
         for (var i = 0; i < OutputCount; i++)
         {
             _settings.HardwareOutputIds[i] = ToSavedId(_outputRows[i].SelectedDevice);
+            _settings.OutputNames[i] = ToSavedName(_outputRows[i].Name, _outputRows[i].DefaultName);
         }
 
         for (var channel = 0; channel < ChannelCount; channel++)
         {
+            _settings.InputNames[channel] = ToSavedName(_channelRows[channel].Name, _channelRows[channel].DefaultName);
             _settings.InputVolumes[channel] = _channelRows[channel].Volume;
             for (var output = 0; output < OutputCount; output++)
             {
-                _settings.InputRouting[channel * OutputCount + output] = _channelRows[channel].Routing[output];
+                _settings.InputRouting[channel * OutputCount + output] = _channelRows[channel].GetRoute(output);
             }
         }
 
@@ -336,6 +336,9 @@ public partial class MainWindow : Window
 
     private static string? ToSavedId(AudioDeviceOption? option) =>
         option is null ? null : option.Id.Length == 0 ? string.Empty : option.Id;
+
+    private static string? ToSavedName(string name, string defaultName) =>
+        string.Equals(name, defaultName, StringComparison.Ordinal) ? null : name;
 
     private void MixerTab_Checked(object sender, RoutedEventArgs e)
     {
@@ -402,74 +405,137 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ChannelDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void ChannelRow_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (_isInitializingUi)
+        if (_isInitializingUi || _isSyncingRoutes || sender is not MixerChannelRow row)
         {
             return;
         }
 
+        switch (e.PropertyName)
+        {
+            case nameof(MixerChannelRow.Volume):
+                _mixer?.SetInputVolume(row.Index, (float)row.Volume);
+                SaveMixerSettings();
+                break;
+
+            case nameof(MixerChannelRow.RouteA1):
+                ApplyRoute(row, 0);
+                break;
+
+            case nameof(MixerChannelRow.RouteA2):
+                ApplyRoute(row, 1);
+                break;
+
+            case nameof(MixerChannelRow.RouteA3):
+                ApplyRoute(row, 2);
+                break;
+
+            case nameof(MixerChannelRow.RouteA4):
+                ApplyRoute(row, 3);
+                break;
+
+            case nameof(MixerChannelRow.SelectedDevice):
+                SyncFeedbackRoutes();
+                SaveMixerSettings();
+                NotifyDeviceChanged("入力");
+                break;
+
+            case nameof(MixerChannelRow.Name):
+                SaveMixerSettings();
+                break;
+        }
+    }
+
+    private void ApplyRoute(MixerChannelRow row, int outputIndex)
+    {
+        _mixer?.SetRouting(row.Index, outputIndex, row.GetRoute(outputIndex));
         SaveMixerSettings();
+    }
+
+    private void OutputRow_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_isInitializingUi || _isSyncingRoutes || sender is not MixerOutputRow)
+        {
+            return;
+        }
+
+        if (e.PropertyName == nameof(MixerOutputRow.SelectedDevice))
+        {
+            SyncFeedbackRoutes();
+            SaveMixerSettings();
+            NotifyDeviceChanged("出力先");
+        }
+        else if (e.PropertyName == nameof(MixerOutputRow.Name))
+        {
+            SaveMixerSettings();
+        }
+    }
+
+    private void NotifyDeviceChanged(string kind)
+    {
         if (_mixer is not null)
         {
-            StatusText.Text = "デバイスを変更しました。「停止」してから再度「ミックス開始」で反映されます。";
+            StatusText.Text = $"{kind}を変更しました。「停止」してから再度「ミックス開始」で反映されます。";
         }
     }
 
-    private void OutputDevice_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void SyncFeedbackRoutes()
     {
-        if (_isInitializingUi)
+        _isSyncingRoutes = true;
+        try
         {
-            return;
-        }
+            foreach (var row in _channelRows.Where(row => row.IsVirtual))
+            {
+                for (var output = 0; output < _outputRows.Count; output++)
+                {
+                    var inputId = row.SelectedDevice?.Id;
+                    var outputId = _outputRows[output].SelectedDevice?.Id;
+                    if (string.IsNullOrEmpty(inputId) || string.IsNullOrEmpty(outputId))
+                    {
+                        continue;
+                    }
 
-        SaveMixerSettings();
-        if (_mixer is not null)
+                    if (string.Equals(inputId, outputId, StringComparison.Ordinal))
+                    {
+                        row.SetRouteSilently(output, false);
+                    }
+                }
+
+                if (!row.HasAnyRoute)
+                {
+                    for (var output = 0; output < _outputRows.Count; output++)
+                    {
+                        var outputId = _outputRows[output].SelectedDevice?.Id;
+                        if (string.IsNullOrEmpty(outputId) ||
+                            !string.Equals(outputId, row.SelectedDevice?.Id, StringComparison.Ordinal))
+                        {
+                            row.SetRouteSilently(output, true);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        finally
         {
-            StatusText.Text = "出力先を変更しました。「停止」してから再度「ミックス開始」で反映されます。";
+            _isSyncingRoutes = false;
         }
-    }
-
-    private void ChannelVolume_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (_isInitializingUi || sender is not Slider { DataContext: MixerChannelRow row })
-        {
-            return;
-        }
-
-        _mixer?.SetInputVolume(row.Index, (float)row.Volume);
-        SaveMixerSettings();
-    }
-
-    private void RouteToggle_Click(object sender, RoutedEventArgs e)
-    {
-        if (_isInitializingUi || sender is not ToggleButton { DataContext: MixerChannelRow row } toggle)
-        {
-            return;
-        }
-
-        if (toggle.Tag is not string tag || !int.TryParse(tag, out var outputIndex))
-        {
-            return;
-        }
-
-        _mixer?.SetRouting(row.Index, outputIndex, toggle.IsChecked == true);
-        SaveMixerSettings();
     }
 
     private void StartButton_Click(object sender, RoutedEventArgs e)
     {
         var inputs = _channelRows
             .Select(row => new MixerInputDefinition(
-                row.Label,
+                row.Name,
                 string.IsNullOrEmpty(row.SelectedDevice?.Id) ? null : row.SelectedDevice!.Id,
                 row.IsVirtual,
                 (float)row.Volume,
-                (bool[])row.Routing.Clone()))
+                row.RoutingSnapshot()))
             .ToArray();
         var outputs = _outputRows
             .Select(row => new MixerOutputDefinition(
-                row.Label,
+                row.Name,
                 string.IsNullOrEmpty(row.SelectedDevice?.Id) ? null : row.SelectedDevice!.Id))
             .ToArray();
 
@@ -711,3 +777,8 @@ public partial class MainWindow : Window
         }
     }
 }
+
+
+
+
+
