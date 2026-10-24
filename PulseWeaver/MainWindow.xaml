@@ -236,6 +236,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="168"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="168"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
                     <TextBox Style="{StaticResource NameBox}" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -245,6 +246,17 @@
                 <ComboBox Grid.Column="1" ItemsSource="{Binding Options}"
                           SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
                           DisplayMemberPath="Name" Height="30" VerticalAlignment="Center"/>
+                <Grid Grid.Column="2" Margin="12,0,4,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="44"/>
+                    </Grid.ColumnDefinitions>
+                    <Slider Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}"
+                            VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding Volume, StringFormat=P0}"
+                               TextAlignment="Right" VerticalAlignment="Center"
+                               Foreground="#A8B3C5" FontSize="11"/>
+                </Grid>
             </Grid>
         </DataTemplate>
     </Window.Resources>
@@ -345,6 +357,7 @@
                          SelectionChanged="SettingsNavList_SelectionChanged">
                     <ListBoxItem Content="一般"/>
                     <ListBoxItem Content="音声"/>
+                    <ListBoxItem Content="構成"/>
                     <ListBoxItem Content="更新情報"/>
                     <ListBoxItem Content="このアプリについて"/>
                 </ListBox>
@@ -379,6 +392,47 @@
                                                Text="小さいほど遅延は減りますが、音切れが起きやすくなります。次回ミックス開始時に反映されます。"/>
                                     <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
                                                Text="音量と A1〜A4 の振り分けは動作中でも即時反映されます。デバイスの変更は「停止」してから再度「ミックス開始」してください。"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <StackPanel x:Name="ProfileSettingsPanel" Visibility="Collapsed">
+                            <TextBlock Text="構成" Style="{StaticResource SectionTitle}"/>
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="保存済みの構成" Foreground="#C6D0DE"/>
+                                    <ComboBox x:Name="ProfileCombo" Margin="0,6,0,0" Height="34" Width="320"
+                                              HorizontalAlignment="Left" DisplayMemberPath="Name"
+                                              SelectionChanged="ProfileCombo_SelectionChanged"/>
+                                    <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0"
+                                               Text="選択すると即座に構成が切り替わります（ミックス中なら再起動します）。"/>
+
+                                    <TextBlock Text="現在の構成を保存" Foreground="#C6D0DE" Margin="0,16,0,0"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                        <TextBox x:Name="ProfileNameBox" Width="240" Height="32"
+                                                 VerticalContentAlignment="Center" Padding="8,0"
+                                                 Background="#111722" Foreground="#F1F5F9"
+                                                 BorderBrush="#2C374B" CaretBrush="#4F7DFF"
+                                                 ToolTip="例: ゲーム配信、Discord通話"/>
+                                        <Button x:Name="SaveProfileButton" Style="{StaticResource PrimaryButton}"
+                                                Content="保存" Margin="8,0,0,0" Padding="16,7"
+                                                Click="SaveProfileButton_Click"/>
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                        <Button Style="{StaticResource SecondaryButton}" Content="エクスポート"
+                                                Margin="0,0,8,0" Click="ExportSettingsButton_Click"/>
+                                        <Button Style="{StaticResource SecondaryButton}" Content="インポート"
+                                                Margin="0,0,8,0" Click="ImportSettingsButton_Click"/>
+                                        <Button Style="{StaticResource SecondaryButton}" Content="再読み込み"
+                                                Margin="0,0,8,0" Click="ReloadProfilesButton_Click"/>
+                                        <Button Style="{StaticResource SecondaryButton}" Content="フォルダを開く"
+                                                Click="OpenProfilesFolder_Click"/>
+                                    </StackPanel>
+
+                                    <TextBlock x:Name="ProfileStatusText" Style="{StaticResource Caption}" Margin="0,12,0,0"/>
+                                    <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
+                                               Text="構成ファイルはアプリの usr/settings フォルダに JSON で保存されます。手動で置いたファイルも一覧に表示されます。"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
@@ -426,22 +480,32 @@
                                     <ItemsControl x:Name="ReleaseHistoryList">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Button Style="{StaticResource LinkRowButton}" Tag="{Binding HtmlUrl}"
-                                                        Click="ReleaseHistoryItem_Click">
-                                                    <Grid>
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="170"/>
-                                                            <ColumnDefinition Width="*"/>
-                                                            <ColumnDefinition Width="Auto"/>
-                                                        </Grid.ColumnDefinitions>
-                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
-                                                        <TextBlock Grid.Column="1" Text="{Binding Note}"
-                                                                   Foreground="#8A97AC" TextTrimming="CharacterEllipsis"
-                                                                   Margin="8,0,8,0"/>
-                                                        <TextBlock Grid.Column="2" Text="{Binding PublishedText}"
-                                                                   Foreground="#8A97AC" FontSize="12"/>
-                                                    </Grid>
-                                                </Button>
+                                                <StackPanel Margin="0,0,0,4">
+                                                    <Button Style="{StaticResource LinkRowButton}" Tag="{Binding HtmlUrl}"
+                                                            Click="ReleaseHistoryItem_Click">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="170"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                                                            <TextBlock Grid.Column="1" Text="{Binding Note}"
+                                                                       Foreground="#8A97AC" TextTrimming="CharacterEllipsis"
+                                                                       Margin="8,0,8,0"/>
+                                                            <TextBlock Grid.Column="2" Text="{Binding PublishedText}"
+                                                                       Foreground="#8A97AC" FontSize="12"/>
+                                                        </Grid>
+                                                    </Button>
+                                                    <ItemsControl ItemsSource="{Binding Changes}" Margin="16,0,10,4">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <TextBlock Text="{Binding}" Foreground="#9AA7BC" FontSize="11"
+                                                                           TextWrapping="Wrap" Margin="0,1,0,1"/>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>

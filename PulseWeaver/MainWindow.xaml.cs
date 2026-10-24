@@ -16,25 +16,29 @@ public partial class MainWindow : Window
     private const int ChannelCount = HardwareInputCount + VirtualInputCount;
 
     private readonly MMDeviceEnumerator _deviceEnumerator = new();
-    private readonly AppSettings _settings = AppSettings.Load();
+    private AppSettings _settings = AppSettings.Load();
     private readonly UpdateService _updateService = new();
     private readonly List<MixerChannelRow> _channelRows = new();
     private readonly List<MixerOutputRow> _outputRows = new();
     private MixerEngine? _mixer;
     private IReadOnlyList<UpdateRelease> _releases = Array.Empty<UpdateRelease>();
+    private IReadOnlyDictionary<string, IReadOnlyList<string>> _changelog =
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
     private UpdateRelease? _availableRelease;
     private bool _isInitializingUi;
     private bool _isSyncingRoutes;
     private bool _isApplyingSettings;
     private bool _isCheckingUpdates;
     private bool _isUpdating;
+    private bool _isRefreshingProfiles;
 
     public MainWindow()
     {
         InitializeComponent();
         ApplySettingsToUi();
         LoadDevices();
-        BuildMixerRows();
+        BuildMixerRows(reloadDevices: false);
+        RefreshProfiles();
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
     }
@@ -82,7 +86,10 @@ public partial class MainWindow : Window
                 LatencyCombo.SelectedIndex = 1;
             }
 
-            SettingsNavList.SelectedIndex = 0;
+            if (SettingsNavList.SelectedIndex < 0)
+            {
+                SettingsNavList.SelectedIndex = 0;
+            }
         }
         finally
         {
@@ -120,11 +127,29 @@ public partial class MainWindow : Window
     private AudioDeviceOption[] _renderDevices = Array.Empty<AudioDeviceOption>();
     private AudioDeviceOption[] _captureDevices = Array.Empty<AudioDeviceOption>();
 
-    private void BuildMixerRows()
+    private void BuildMixerRows(bool reloadDevices)
     {
         _isInitializingUi = true;
         try
         {
+            foreach (var row in _channelRows)
+            {
+                row.PropertyChanged -= ChannelRow_PropertyChanged;
+            }
+
+            foreach (var row in _outputRows)
+            {
+                row.PropertyChanged -= OutputRow_PropertyChanged;
+            }
+
+            _channelRows.Clear();
+            _outputRows.Clear();
+
+            if (reloadDevices)
+            {
+                LoadDevices();
+            }
+
             var none = new AudioDeviceOption(string.Empty, "（なし）");
             var renderOptions = new[] { none }.Concat(_renderDevices).ToArray();
             var captureOptions = new[] { none }.Concat(_captureDevices).ToArray();
@@ -160,7 +185,8 @@ public partial class MainWindow : Window
             for (var i = 0; i < OutputCount; i++)
             {
                 var selected = ResolveDevice(renderOptions, _settings.HardwareOutputIds[i], outputDefaults[i]);
-                _outputRows.Add(new MixerOutputRow(i, $"A{i + 1}", renderOptions, selected, _settings.OutputNames[i]));
+                _outputRows.Add(new MixerOutputRow(i, $"A{i + 1}", renderOptions, selected, _settings.OutputNames[i],
+                    _settings.OutputVolumes[i]));
             }
 
             foreach (var row in _channelRows)
@@ -319,6 +345,7 @@ public partial class MainWindow : Window
         {
             _settings.HardwareOutputIds[i] = ToSavedId(_outputRows[i].SelectedDevice);
             _settings.OutputNames[i] = ToSavedName(_outputRows[i].Name, _outputRows[i].DefaultName);
+            _settings.OutputVolumes[i] = _outputRows[i].Volume;
         }
 
         for (var channel = 0; channel < ChannelCount; channel++)
@@ -376,8 +403,9 @@ public partial class MainWindow : Window
         var index = SettingsNavList.SelectedIndex;
         GeneralSettingsPanel.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
         AudioSettingsPanel.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
-        UpdateSettingsPanel.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
-        AboutSettingsPanel.Visibility = index == 3 ? Visibility.Visible : Visibility.Collapsed;
+        ProfileSettingsPanel.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateSettingsPanel.Visibility = index == 3 ? Visibility.Visible : Visibility.Collapsed;
+        AboutSettingsPanel.Visibility = index == 4 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void AutoCheckCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -455,20 +483,27 @@ public partial class MainWindow : Window
 
     private void OutputRow_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (_isInitializingUi || _isSyncingRoutes || sender is not MixerOutputRow)
+        if (_isInitializingUi || _isSyncingRoutes || sender is not MixerOutputRow row)
         {
             return;
         }
 
-        if (e.PropertyName == nameof(MixerOutputRow.SelectedDevice))
+        switch (e.PropertyName)
         {
-            SyncFeedbackRoutes();
-            SaveMixerSettings();
-            NotifyDeviceChanged("出力先");
-        }
-        else if (e.PropertyName == nameof(MixerOutputRow.Name))
-        {
-            SaveMixerSettings();
+            case nameof(MixerOutputRow.SelectedDevice):
+                SyncFeedbackRoutes();
+                SaveMixerSettings();
+                NotifyDeviceChanged("出力先");
+                break;
+
+            case nameof(MixerOutputRow.Volume):
+                _mixer?.SetOutputVolume(row.Index, (float)row.Volume);
+                SaveMixerSettings();
+                break;
+
+            case nameof(MixerOutputRow.Name):
+                SaveMixerSettings();
+                break;
         }
     }
 
@@ -523,7 +558,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private void StartButton_Click(object sender, RoutedEventArgs e)
+    private void StartButton_Click(object sender, RoutedEventArgs e) => StartMixing(showValidationMessages: true);
+
+    private void StartMixing(bool showValidationMessages)
     {
         var inputs = _channelRows
             .Select(row => new MixerInputDefinition(
@@ -536,20 +573,29 @@ public partial class MainWindow : Window
         var outputs = _outputRows
             .Select(row => new MixerOutputDefinition(
                 row.Name,
-                string.IsNullOrEmpty(row.SelectedDevice?.Id) ? null : row.SelectedDevice!.Id))
+                string.IsNullOrEmpty(row.SelectedDevice?.Id) ? null : row.SelectedDevice!.Id,
+                (float)row.Volume))
             .ToArray();
 
         if (outputs.All(output => output.DeviceId is null))
         {
-            MessageBox.Show("H/W出力を1つ以上選択してください。", "出力が未選択",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (showValidationMessages)
+            {
+                MessageBox.Show("H/W出力を1つ以上選択してください。", "出力が未選択",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+
             return;
         }
 
         if (inputs.All(input => input.DeviceId is null))
         {
-            MessageBox.Show("H/W入力またはバーチャル入力を1つ以上選択してください。", "入力が未選択",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (showValidationMessages)
+            {
+                MessageBox.Show("H/W入力またはバーチャル入力を1つ以上選択してください。", "入力が未選択",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+
             return;
         }
 
@@ -561,6 +607,11 @@ public partial class MainWindow : Window
         try
         {
             _mixer = new MixerEngine(inputs, outputs, _settings.OutputLatencyMs);
+            foreach (var row in _outputRows)
+            {
+                _mixer.SetOutputVolume(row.Index, (float)row.Volume);
+            }
+
             _mixer.Start();
 
             StartButton.IsEnabled = false;
@@ -571,7 +622,7 @@ public partial class MainWindow : Window
                 ? $"ミックス中です（出力 {_mixer.ActiveOutputCount} 件）。"
                 : $"ミックス中です（出力 {_mixer.ActiveOutputCount} 件 / 警告 {warnings.Count} 件）。";
 
-            if (warnings.Count > 0)
+            if (warnings.Count > 0 && showValidationMessages)
             {
                 MessageBox.Show(
                     string.Join(Environment.NewLine, warnings) + $"{Environment.NewLine}{Environment.NewLine}ログ: {AppPaths.LogDirectory}",
@@ -588,8 +639,12 @@ public partial class MainWindow : Window
             StopButton.IsEnabled = false;
             AppLog.Error("音声の開始に失敗しました。", exception);
 
-            MessageBox.Show($"{exception.Message}{Environment.NewLine}{Environment.NewLine}ログ: {AppPaths.LogDirectory}",
-                "音声を開始できません", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (showValidationMessages)
+            {
+                MessageBox.Show($"{exception.Message}{Environment.NewLine}{Environment.NewLine}ログ: {AppPaths.LogDirectory}",
+                    "音声を開始できません", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+
             StatusText.Text = "音声を開始できませんでした。設定タブのログフォルダで詳細を確認できます。";
         }
     }
@@ -603,10 +658,24 @@ public partial class MainWindow : Window
         StatusText.Text = "停止しました。";
     }
 
+    private void RestartMixerIfRunning()
+    {
+        if (_mixer is null)
+        {
+            return;
+        }
+
+        _mixer.Dispose();
+        _mixer = null;
+        StartButton.IsEnabled = true;
+        StopButton.IsEnabled = false;
+        StartMixing(showValidationMessages: false);
+    }
+
     private void OpenUpdateSettings_Click(object sender, RoutedEventArgs e)
     {
         SettingsTabButton.IsChecked = true;
-        SettingsNavList.SelectedIndex = 2;
+        SettingsNavList.SelectedIndex = 3;
     }
 
     private async void CheckUpdatesButton_Click(object sender, RoutedEventArgs e) =>
@@ -626,6 +695,7 @@ public partial class MainWindow : Window
         try
         {
             _releases = await _updateService.GetReleasesAsync(CancellationToken.None);
+            _changelog = await _updateService.GetChangelogAsync(CancellationToken.None);
             _settings.LastUpdateCheckUtc = DateTime.UtcNow;
             _settings.Save();
             UpdateReleaseHistory();
@@ -680,11 +750,22 @@ public partial class MainWindow : Window
                 release.IsPrerelease ? $"{release.TagName}（プレリリース）" : release.TagName,
                 release.Name,
                 release.PublishedAt is null ? string.Empty : release.PublishedAt.Value.ToLocalTime().ToString("yyyy/MM/dd"),
-                release.HtmlUrl))
+                release.HtmlUrl,
+                GetChangeLines(release.Version)))
             .ToArray();
 
         ReleaseHistoryList.ItemsSource = items;
         ReleaseHistoryEmptyText.Visibility = items.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private IReadOnlyList<string> GetChangeLines(string version)
+    {
+        if (!_changelog.TryGetValue(version, out var lines) || lines.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        return lines.Select(line => $"・{line}").ToArray();
     }
 
     private void ReleaseHistoryItem_Click(object sender, RoutedEventArgs e)
@@ -763,6 +844,145 @@ public partial class MainWindow : Window
         }
     }
 
+    private void RefreshProfiles(string? selectName = null)
+    {
+        _isRefreshingProfiles = true;
+        try
+        {
+            var profiles = ProfileService.ListProfiles();
+            ProfileCombo.ItemsSource = profiles;
+            ProfileCombo.SelectedItem = selectName is null
+                ? null
+                : profiles.FirstOrDefault(profile => string.Equals(profile.Name, selectName, StringComparison.OrdinalIgnoreCase));
+
+            ProfileStatusText.Text = profiles.Count == 0
+                ? "保存済みの構成はありません。「現在の構成を保存」で作成できます。"
+                : $"{profiles.Count} 件の構成があります。選択すると即座に切り替わります。";
+        }
+        finally
+        {
+            _isRefreshingProfiles = false;
+        }
+    }
+
+    private void ProfileCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isRefreshingProfiles || ProfileCombo.SelectedItem is not ProfileEntry entry)
+        {
+            return;
+        }
+
+        try
+        {
+            ApplySettings(ProfileService.LoadFromFile(entry.Path));
+            ProfileStatusText.Text = $"「{entry.Name}」を適用しました。";
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error($"構成「{entry.Name}」を読み込めませんでした。", exception);
+            ProfileStatusText.Text = $"読み込めませんでした: {exception.Message}";
+        }
+    }
+
+    private void SaveProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var name = ProfileService.SanitizeName(ProfileNameBox.Text);
+            ProfileService.SaveProfile(name, _settings);
+            ProfileNameBox.Text = string.Empty;
+            RefreshProfiles(name);
+            ProfileStatusText.Text = $"「{name}」として保存しました。";
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("構成を保存できませんでした。", exception);
+            ProfileStatusText.Text = $"保存できませんでした: {exception.Message}";
+        }
+    }
+
+    private void ExportSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "構成をエクスポート",
+            Filter = "PulseWeaver 構成 (*.json)|*.json|すべてのファイル (*.*)|*.*",
+            DefaultExt = ".json",
+            FileName = $"PulseWeaver-{DateTime.Now:yyyyMMdd-HHmm}.json",
+            InitialDirectory = AppPaths.ProfilesDirectory
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            ProfileService.Export(_settings, dialog.FileName);
+            ProfileStatusText.Text = $"エクスポートしました: {dialog.FileName}";
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("構成をエクスポートできませんでした。", exception);
+            ProfileStatusText.Text = $"エクスポートできませんでした: {exception.Message}";
+        }
+    }
+
+    private void ImportSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "構成をインポート",
+            Filter = "PulseWeaver 構成 (*.json)|*.json|すべてのファイル (*.*)|*.*",
+            DefaultExt = ".json",
+            InitialDirectory = AppPaths.ProfilesDirectory
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            ApplySettings(ProfileService.Import(dialog.FileName));
+            ProfileStatusText.Text = $"インポートしました: {dialog.FileName}";
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("構成をインポートできませんでした。", exception);
+            ProfileStatusText.Text = $"インポートできませんでした: {exception.Message}";
+        }
+    }
+
+    private void ReloadProfilesButton_Click(object sender, RoutedEventArgs e) => RefreshProfiles();
+
+    private void OpenProfilesFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            ProfileService.EnsureDirectory();
+            Process.Start(new ProcessStartInfo("explorer.exe", AppPaths.ProfilesDirectory) { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("構成フォルダを開けませんでした。", exception);
+            ProfileStatusText.Text = $"フォルダを開けませんでした: {exception.Message}";
+        }
+    }
+
+    private void ApplySettings(AppSettings settings)
+    {
+        settings.EnsureShape();
+        _settings = settings;
+        _settings.Save();
+        ApplySettingsToUi();
+        BuildMixerRows(reloadDevices: true);
+        RestartMixerIfRunning();
+        StatusText.Text = "構成を切り替えました。";
+    }
+
     private void SetUpdateStatus(string message) => UpdateStatusText.Text = message;
 
     private void OpenUrl(string url)
@@ -777,8 +997,3 @@ public partial class MainWindow : Window
         }
     }
 }
-
-
-
-
-

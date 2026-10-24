@@ -6,7 +6,7 @@ namespace PulseWeaver;
 
 internal sealed record MixerInputDefinition(string Label, string? DeviceId, bool IsLoopback, float Volume, bool[] Routing);
 
-internal sealed record MixerOutputDefinition(string Label, string? DeviceId);
+internal sealed record MixerOutputDefinition(string Label, string? DeviceId, float Volume = 0.8f);
 
 internal sealed class MixerEngine : IDisposable
 {
@@ -41,7 +41,8 @@ internal sealed class MixerEngine : IDisposable
                     {
                         Label = outputs[i].Label,
                         Device = device,
-                        MixFormat = device.AudioClient.MixFormat
+                        MixFormat = device.AudioClient.MixFormat,
+                        Volume = Math.Clamp(outputs[i].Volume, 0f, 1f)
                     };
                 }
                 catch (Exception exception)
@@ -144,6 +145,20 @@ internal sealed class MixerEngine : IDisposable
 
         input.Volume = Math.Clamp(volume, 0f, 1f);
         ApplyGains(input);
+    }
+
+    public void SetOutputVolume(int outputIndex, float volume)
+    {
+        if (outputIndex < 0 || outputIndex >= _outputTargets.Length || _outputTargets[outputIndex] is not { } target)
+        {
+            return;
+        }
+
+        target.Volume = Math.Clamp(volume, 0f, 1f);
+        if (target.Master is not null)
+        {
+            target.Master.Volume = target.Volume;
+        }
     }
 
     public void SetRouting(int inputIndex, int outputIndex, bool enabled)
@@ -268,8 +283,9 @@ internal sealed class MixerEngine : IDisposable
             try
             {
                 var mixer = new MixingSampleProvider(gains) { ReadFully = true };
+                target.Master = new VolumeSampleProvider(mixer) { Volume = target.Volume };
                 var output = new WasapiOut(target.Device, AudioClientShareMode.Shared, true, Math.Clamp(outputLatencyMs, 20, 500));
-                output.Init(CreateOutputWaveProvider(mixer, target.MixFormat));
+                output.Init(CreateOutputWaveProvider(target.Master, target.MixFormat));
                 target.Output = output;
                 AppLog.Info($"{target.Label} の出力: {target.Device.FriendlyName} ({target.MixFormat}), 入力 {gains.Length} 件");
             }
@@ -400,6 +416,8 @@ internal sealed class MixerEngine : IDisposable
         public required string Label { get; init; }
         public required MMDevice Device { get; init; }
         public required WaveFormat MixFormat { get; init; }
+        public float Volume { get; set; }
+        public VolumeSampleProvider? Master { get; set; }
         public WasapiOut? Output { get; set; }
     }
 }

@@ -11,6 +11,7 @@ internal static class AppInfo
     public static string RepositoryUrl => $"https://github.com/{RepositoryOwner}/{RepositoryName}";
     public static string ReleasesUrl => $"{RepositoryUrl}/releases";
     public static string ReleasesApiUrl => $"https://api.github.com/repos/{RepositoryOwner}/{RepositoryName}/releases?per_page=15";
+    public static string ChangelogUrlTemplate => $"https://raw.githubusercontent.com/{RepositoryOwner}/{RepositoryName}/{{0}}/CHANGELOG.md";
 
     public static string Version { get; } = ResolveVersion();
     public static string DisplayVersion => $"v{Version}";

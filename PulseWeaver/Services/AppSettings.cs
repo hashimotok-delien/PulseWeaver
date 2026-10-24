@@ -25,6 +25,8 @@ internal sealed class AppSettings
 
     public double[] InputVolumes { get; set; } = Enumerable.Repeat(0.8, 9).ToArray();
 
+    public double[] OutputVolumes { get; set; } = Enumerable.Repeat(0.8, 4).ToArray();
+
     public bool[] InputRouting { get; set; } = new bool[9 * 4];
 
     public static TimeSpan AutoCheckInterval { get; } = TimeSpan.FromHours(24);
@@ -35,10 +37,7 @@ internal sealed class AppSettings
         {
             if (File.Exists(AppPaths.SettingsFile))
             {
-                var json = File.ReadAllText(AppPaths.SettingsFile);
-                var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
-                settings.EnsureShape();
-                return settings;
+                return LoadFrom(AppPaths.SettingsFile);
             }
         }
         catch (Exception exception)
@@ -48,6 +47,40 @@ internal sealed class AppSettings
 
         return new AppSettings();
     }
+
+    public static AppSettings LoadFrom(string path)
+    {
+        var json = File.ReadAllText(path);
+        var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+        settings.EnsureShape();
+        return settings;
+    }
+
+    public static void SaveTo(AppSettings settings, string path)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        File.WriteAllText(path, JsonSerializer.Serialize(settings, SerializerOptions));
+    }
+
+    public AppSettings Clone() => new()
+    {
+        AutoCheckForUpdates = AutoCheckForUpdates,
+        OutputLatencyMs = OutputLatencyMs,
+        LastUpdateCheckUtc = LastUpdateCheckUtc,
+        HardwareInputIds = (string?[])HardwareInputIds.Clone(),
+        VirtualInputIds = (string?[])VirtualInputIds.Clone(),
+        HardwareOutputIds = (string?[])HardwareOutputIds.Clone(),
+        InputNames = (string?[])InputNames.Clone(),
+        OutputNames = (string?[])OutputNames.Clone(),
+        InputVolumes = (double[])InputVolumes.Clone(),
+        OutputVolumes = (double[])OutputVolumes.Clone(),
+        InputRouting = (bool[])InputRouting.Clone()
+    };
 
     public bool IsAutoCheckDue() =>
         LastUpdateCheckUtc is null || DateTime.UtcNow - LastUpdateCheckUtc.Value >= AutoCheckInterval;
@@ -76,6 +109,11 @@ internal sealed class AppSettings
         if (InputVolumes.Length != 9)
         {
             InputVolumes = Enumerable.Repeat(0.8, 9).ToArray();
+        }
+
+        if (OutputVolumes is null || OutputVolumes.Length != 4)
+        {
+            OutputVolumes = Enumerable.Repeat(0.8, 4).ToArray();
         }
 
         if (InputRouting.Length != 9 * 4)

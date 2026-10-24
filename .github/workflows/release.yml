@@ -184,6 +184,8 @@ jobs:
             > このアプリはコード署名されていないため、SmartScreen の警告が表示される場合があります。
 
             `SHA256SUMS.txt` でダウンロードしたファイルを検証できます。
+
+            変更内容の詳細は [CHANGELOG.md](https://github.com/hashimotok-delien/PulseWeaver/blob/main/CHANGELOG.md) を参照してください。
           files: |
             dist/PulseWeaver-*-setup.exe
             dist/PulseWeaver-win-x64.zip

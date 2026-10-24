@@ -107,6 +107,122 @@ internal sealed class UpdateService : IDisposable
         return releases.Count == 0 ? null : releases[0];
     }
 
+    public async Task<IReadOnlyDictionary<string, IReadOnlyList<string>>> GetChangelogAsync(CancellationToken cancellationToken)
+    {
+        foreach (var branch in new[] { "main", "master" })
+        {
+            try
+            {
+                var url = string.Format(AppInfo.ChangelogUrlTemplate, branch);
+                var markdown = await _httpClient.GetStringAsync(url, cancellationToken);
+                return ParseChangelog(markdown);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                AppLog.Info($"CHANGELOG を取得できませんでした ({branch}): {exception.Message}");
+            }
+        }
+
+        AppLog.Info("同梱の CHANGELOG を使用します。");
+        return LoadEmbeddedChangelog();
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> LoadEmbeddedChangelog()
+    {
+        try
+        {
+            var assembly = typeof(UpdateService).Assembly;
+            var name = assembly.GetManifestResourceNames()
+                .FirstOrDefault(resource => resource.EndsWith("CHANGELOG.md", StringComparison.OrdinalIgnoreCase));
+            if (name is null)
+            {
+                return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            using var stream = assembly.GetManifestResourceStream(name)!;
+            using var reader = new StreamReader(stream);
+            return ParseChangelog(reader.ReadToEnd());
+        }
+        catch (Exception exception)
+        {
+            AppLog.Error("同梱 CHANGELOG の読み込みに失敗しました。", exception);
+            return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    internal static IReadOnlyDictionary<string, IReadOnlyList<string>> ParseChangelog(string markdown)
+    {
+        var result = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        string? currentVersion = null;
+        string? currentSection = null;
+        var items = new List<string>();
+
+        void Commit()
+        {
+            if (currentVersion is not null)
+            {
+                result[currentVersion] = items.ToArray();
+            }
+        }
+
+        foreach (var rawLine in markdown.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r');
+            if (line.StartsWith("## ", StringComparison.Ordinal))
+            {
+                Commit();
+                currentVersion = ExtractVersion(line[3..]);
+                currentSection = null;
+                items = new List<string>();
+                continue;
+            }
+
+            if (currentVersion is null)
+            {
+                continue;
+            }
+
+            if (line.StartsWith("### ", StringComparison.Ordinal))
+            {
+                currentSection = line[4..].Trim();
+                continue;
+            }
+
+            var trimmed = line.TrimStart();
+            if (trimmed.StartsWith("- ", StringComparison.Ordinal))
+            {
+                var text = trimmed[2..].Trim();
+                if (text.Length > 0)
+                {
+                    items.Add(currentSection is null ? text : $"{currentSection}: {text}");
+                }
+            }
+        }
+
+        Commit();
+        return result;
+    }
+
+    private static string? ExtractVersion(string heading)
+    {
+        var text = heading.Trim();
+        if (text.StartsWith('['))
+        {
+            var end = text.IndexOf(']');
+            if (end > 1)
+            {
+                return VersionComparer.Normalize(text[1..end]);
+            }
+        }
+
+        var token = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return token is null ? null : VersionComparer.Normalize(token);
+    }
+
     public async Task<string> DownloadInstallerAsync(UpdateRelease release, IProgress<double>? progress, CancellationToken cancellationToken)
     {
         if (release.InstallerUrl is null || release.InstallerName is null)

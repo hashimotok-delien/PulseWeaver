@@ -157,15 +157,17 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
 internal sealed class MixerOutputRow : INotifyPropertyChanged
 {
     private string _name;
+    private double _volume;
     private AudioDeviceOption? _selectedDevice;
 
-    public MixerOutputRow(int index, string defaultName, AudioDeviceOption[] options, AudioDeviceOption? selectedDevice, string? savedName)
+    public MixerOutputRow(int index, string defaultName, AudioDeviceOption[] options, AudioDeviceOption? selectedDevice, string? savedName, double volume)
     {
         Index = index;
         DefaultName = defaultName;
         Options = options;
         _selectedDevice = selectedDevice;
         _name = string.IsNullOrWhiteSpace(savedName) ? defaultName : savedName.Trim();
+        _volume = volume;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -207,8 +209,29 @@ internal sealed class MixerOutputRow : INotifyPropertyChanged
         }
     }
 
+    public double Volume
+    {
+        get => _volume;
+        set
+        {
+            var clamped = Math.Clamp(value, 0d, 1d);
+            if (Math.Abs(clamped - _volume) < 0.0001)
+            {
+                return;
+            }
+
+            _volume = clamped;
+            OnPropertyChanged();
+        }
+    }
+
     private void OnPropertyChanged([System.Runtime.CompilerServices.CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
 
-internal sealed record ReleaseHistoryItem(string Title, string Note, string PublishedText, string HtmlUrl);
+internal sealed record ReleaseHistoryItem(
+    string Title,
+    string Note,
+    string PublishedText,
+    string HtmlUrl,
+    IReadOnlyList<string> Changes);

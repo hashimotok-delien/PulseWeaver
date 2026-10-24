@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <Version>0.0.4</Version>
+    <Version>0.0.5</Version>
     <Product>PulseWeaver</Product>
     <AssemblyTitle>PulseWeaver</AssemblyTitle>
     <ApplicationIcon>Assets\PulseWeaver.ico</ApplicationIcon>
@@ -18,7 +18,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\PulseWeaver.ico" />
+    <EmbeddedResource Include="..\CHANGELOG.md" Link="Assets\CHANGELOG.md" />
   </ItemGroup>
 
 </Project>
-

@@ -10,4 +10,6 @@ internal static class AppPaths
     public static string LogDirectory => Path.Combine(DataDirectory, "logs");
     public static string UpdatesDirectory => Path.Combine(DataDirectory, "updates");
     public static string SettingsFile => Path.Combine(DataDirectory, "settings.json");
+
+    public static string ProfilesDirectory => Path.Combine(AppContext.BaseDirectory, "usr", "settings");
 }
