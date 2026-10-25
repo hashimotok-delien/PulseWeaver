@@ -1,11 +1,25 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace PulseWeaver;
 
 internal sealed class AppSettings
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+    /// <summary>入力・出力を可変ストリップで持つ形式。1 以下は 0.0.6 以前の固定長配列。</summary>
+    public const int CurrentVersion = 2;
+
+    private const int LegacyHardwareInputCount = 6;
+    private const int LegacyVirtualInputCount = 3;
+    private const int LegacyOutputCount = 4;
+
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        WriteIndented = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    public int Version { get; set; } = CurrentVersion;
 
     public bool AutoCheckForUpdates { get; set; } = true;
 
@@ -21,21 +35,35 @@ internal sealed class AppSettings
 
     public DateTime? LastUpdateCheckUtc { get; set; }
 
-    public string?[] HardwareInputIds { get; set; } = new string?[6];
+    public List<MixerInputConfig> Inputs { get; set; } = CreateDefaultInputs();
 
-    public string?[] VirtualInputIds { get; set; } = new string?[3];
+    public List<MixerOutputConfig> Outputs { get; set; } = CreateDefaultOutputs();
 
-    public string?[] HardwareOutputIds { get; set; } = new string?[4];
+    // ---- 0.0.6 以前の形式。読み込み時に Inputs / Outputs へ移行する ----
 
-    public string?[] InputNames { get; set; } = new string?[9];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string?[]? HardwareInputIds { get; set; }
 
-    public string?[] OutputNames { get; set; } = new string?[4];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string?[]? VirtualInputIds { get; set; }
 
-    public double[] InputVolumes { get; set; } = Enumerable.Repeat(0.8, 9).ToArray();
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string?[]? HardwareOutputIds { get; set; }
 
-    public double[] OutputVolumes { get; set; } = Enumerable.Repeat(0.8, 4).ToArray();
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string?[]? InputNames { get; set; }
 
-    public bool[] InputRouting { get; set; } = new bool[9 * 4];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string?[]? OutputNames { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double[]? InputVolumes { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double[]? OutputVolumes { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool[]? InputRouting { get; set; }
 
     public static TimeSpan AutoCheckInterval { get; } = TimeSpan.FromHours(24);
 
@@ -59,7 +87,7 @@ internal sealed class AppSettings
     public static AppSettings LoadFrom(string path)
     {
         var json = File.ReadAllText(path);
-        var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+        var settings = JsonSerializer.Deserialize<AppSettings>(json, SerializerOptions) ?? new AppSettings();
         settings.EnsureShape();
         return settings;
     }
@@ -72,27 +100,27 @@ internal sealed class AppSettings
             Directory.CreateDirectory(directory);
         }
 
+        settings.EnsureShape();
         File.WriteAllText(path, JsonSerializer.Serialize(settings, SerializerOptions));
     }
 
-    public AppSettings Clone() => new()
+    public AppSettings Clone()
     {
-        AutoCheckForUpdates = AutoCheckForUpdates,
-        AutoStartWithWindows = AutoStartWithWindows,
-        BackgroundStart = BackgroundStart,
-        AutoStartMix = AutoStartMix,
-        DefaultProfile = DefaultProfile,
-        OutputLatencyMs = OutputLatencyMs,
-        LastUpdateCheckUtc = LastUpdateCheckUtc,
-        HardwareInputIds = (string?[])HardwareInputIds.Clone(),
-        VirtualInputIds = (string?[])VirtualInputIds.Clone(),
-        HardwareOutputIds = (string?[])HardwareOutputIds.Clone(),
-        InputNames = (string?[])InputNames.Clone(),
-        OutputNames = (string?[])OutputNames.Clone(),
-        InputVolumes = (double[])InputVolumes.Clone(),
-        OutputVolumes = (double[])OutputVolumes.Clone(),
-        InputRouting = (bool[])InputRouting.Clone()
-    };
+        EnsureShape();
+        return new AppSettings
+        {
+            Version = Version,
+            AutoCheckForUpdates = AutoCheckForUpdates,
+            AutoStartWithWindows = AutoStartWithWindows,
+            BackgroundStart = BackgroundStart,
+            AutoStartMix = AutoStartMix,
+            DefaultProfile = DefaultProfile,
+            OutputLatencyMs = OutputLatencyMs,
+            LastUpdateCheckUtc = LastUpdateCheckUtc,
+            Inputs = Inputs.Select(input => input.Clone()).ToList(),
+            Outputs = Outputs.Select(output => output.Clone()).ToList()
+        };
+    }
 
     public bool IsAutoCheckDue() =>
         LastUpdateCheckUtc is null || DateTime.UtcNow - LastUpdateCheckUtc.Value >= AutoCheckInterval;
@@ -102,6 +130,7 @@ internal sealed class AppSettings
         try
         {
             Directory.CreateDirectory(AppPaths.DataDirectory);
+            EnsureShape();
             File.WriteAllText(AppPaths.SettingsFile, JsonSerializer.Serialize(this, SerializerOptions));
         }
         catch (Exception exception)
@@ -125,36 +154,129 @@ internal sealed class AppSettings
 
     public void EnsureShape()
     {
-        HardwareInputIds = Resize(HardwareInputIds, 6);
-        VirtualInputIds = Resize(VirtualInputIds, 3);
-        HardwareOutputIds = Resize(HardwareOutputIds, 4);
-        InputNames = Resize(InputNames, 9);
-        OutputNames = Resize(OutputNames, 4);
-
-        if (InputVolumes.Length != 9)
+        if (Version < CurrentVersion || HasLegacyLayout)
         {
-            InputVolumes = Enumerable.Repeat(0.8, 9).ToArray();
+            MigrateFromLegacy();
         }
 
-        if (OutputVolumes is null || OutputVolumes.Length != 4)
+        Inputs ??= CreateDefaultInputs();
+        Outputs ??= CreateDefaultOutputs();
+
+        foreach (var input in Inputs)
         {
-            OutputVolumes = Enumerable.Repeat(0.8, 4).ToArray();
+            if (string.IsNullOrEmpty(input.Id))
+            {
+                input.Id = Guid.NewGuid().ToString("N");
+            }
         }
 
-        if (InputRouting.Length != 9 * 4)
+        foreach (var output in Outputs)
         {
-            InputRouting = new bool[9 * 4];
+            if (string.IsNullOrEmpty(output.Id))
+            {
+                output.Id = Guid.NewGuid().ToString("N");
+            }
         }
+
+        Version = CurrentVersion;
     }
 
-    private static string?[] Resize(string?[]? values, int length)
+    private void MigrateFromLegacy()
     {
-        var result = new string?[length];
-        if (values is not null)
+        if (!HasLegacyLayout)
         {
-            Array.Copy(values, result, Math.Min(values.Length, length));
+            return;
         }
 
-        return result;
+        var outputs = new List<MixerOutputConfig>();
+        for (var i = 0; i < LegacyOutputCount; i++)
+        {
+            outputs.Add(new MixerOutputConfig
+            {
+                Id = $"out{i + 1}",
+                Role = OutputRole.Physical,
+                DeviceId = At(HardwareOutputIds, i),
+                Name = At(OutputNames, i),
+                Volume = At(OutputVolumes, i, 0.8)
+            });
+        }
+
+        var inputs = new List<MixerInputConfig>();
+        for (var i = 0; i < LegacyHardwareInputCount; i++)
+        {
+            inputs.Add(CreateLegacyInput(i, InputSourceKind.Hardware, outputs, At(HardwareInputIds, i)));
+        }
+
+        for (var i = 0; i < LegacyVirtualInputCount; i++)
+        {
+            inputs.Add(CreateLegacyInput(LegacyHardwareInputCount + i, InputSourceKind.Loopback, outputs, At(VirtualInputIds, i)));
+        }
+
+        Inputs = inputs;
+        Outputs = outputs;
+        HardwareInputIds = null;
+        VirtualInputIds = null;
+        HardwareOutputIds = null;
+        InputNames = null;
+        OutputNames = null;
+        InputVolumes = null;
+        OutputVolumes = null;
+        InputRouting = null;
+        AppLog.Info("0.0.6 以前の設定形式を新しい形式へ移行しました。");
     }
+
+    private MixerInputConfig CreateLegacyInput(int legacyIndex, InputSourceKind kind, List<MixerOutputConfig> outputs, string? deviceId)
+    {
+        var routes = new Dictionary<string, bool>(StringComparer.Ordinal);
+        for (var o = 0; o < outputs.Count; o++)
+        {
+            var index = legacyIndex * LegacyOutputCount + o;
+            routes[outputs[o].Id] = InputRouting is not null && index < InputRouting.Length && InputRouting[index];
+        }
+
+        return new MixerInputConfig
+        {
+            Id = $"in{legacyIndex + 1}",
+            Kind = kind,
+            DeviceId = deviceId,
+            Name = At(InputNames, legacyIndex),
+            Volume = At(InputVolumes, legacyIndex, 0.8),
+            Routes = routes
+        };
+    }
+
+    private bool HasLegacyLayout =>
+        HardwareInputIds is not null || VirtualInputIds is not null || HardwareOutputIds is not null;
+
+    private static string? At(string?[]? values, int index) =>
+        values is not null && index < values.Length ? values[index] : null;
+
+    private static double At(double[]? values, int index, double fallback) =>
+        values is not null && index < values.Length ? values[index] : fallback;
+
+    private static List<MixerInputConfig> CreateDefaultInputs()
+    {
+        var inputs = new List<MixerInputConfig>();
+
+        for (var i = 0; i < 2; i++)
+        {
+            inputs.Add(new MixerInputConfig { Id = $"in{i + 1}", Kind = InputSourceKind.Hardware });
+        }
+
+        for (var i = 0; i < 3; i++)
+        {
+            inputs.Add(new MixerInputConfig { Id = $"in{3 + i}", Kind = InputSourceKind.Loopback });
+        }
+
+        return inputs;
+    }
+
+    private static List<MixerOutputConfig> CreateDefaultOutputs() => new()
+    {
+        new MixerOutputConfig { Id = "out1", Role = OutputRole.Physical },
+        new MixerOutputConfig { Id = "out2", Role = OutputRole.Physical },
+        new MixerOutputConfig { Id = "out3", Role = OutputRole.Physical },
+        new MixerOutputConfig { Id = "out4", Role = OutputRole.Virtual },
+        new MixerOutputConfig { Id = "out5", Role = OutputRole.Virtual }
+    };
 }

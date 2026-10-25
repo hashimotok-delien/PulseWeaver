@@ -1,12 +1,13 @@
 <Window x:Class="PulseWeaver.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="PulseWeaver" Height="800" Width="980"
-        MinHeight="700" MinWidth="880"
+        Title="PulseWeaver" Height="820" Width="1240"
+        MinHeight="700" MinWidth="1080"
         Background="#10141C" Foreground="#F1F5F9"
         Icon="Assets/PulseWeaver.ico"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
         <Style x:Key="TabButton" TargetType="RadioButton">
             <Setter Property="Foreground" Value="#A8B3C5"/>
             <Setter Property="FontSize" Value="15"/>
@@ -123,6 +124,78 @@
             </Setter>
         </Style>
 
+        <Style x:Key="MiniToggle" TargetType="ToggleButton">
+            <Setter Property="Width" Value="26"/>
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="Margin" Value="3,0,0,0"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#8A97AC"/>
+            <Setter Property="Background" Value="#4F7DFF"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Grid>
+                            <Border Background="#232B3A" CornerRadius="6"/>
+                            <Border x:Name="Fill" Background="{TemplateBinding Background}" CornerRadius="6"
+                                    Opacity="0"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Fill" Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Fill" Property="Opacity" Value="1"/>
+                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Fill" Property="Opacity" Value="0.1"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="Meter" TargetType="ProgressBar">
+            <Setter Property="Minimum" Value="0"/>
+            <Setter Property="Maximum" Value="1"/>
+            <Setter Property="Value" Value="0"/>
+            <Setter Property="Height" Value="6"/>
+            <Setter Property="Width" Value="70"/>
+            <Setter Property="Background" Value="#232B3A"/>
+            <Setter Property="Foreground" Value="#5BD3A0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
+        <Style x:Key="RowActionButton" TargetType="Button">
+            <Setter Property="Width" Value="22"/>
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="Margin" Value="2,0,0,0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#8A97AC"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#2C374B"/>
+                                <Setter Property="Foreground" Value="#F1F5F9"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="SectionTitle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="17"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -187,12 +260,58 @@
             </Setter>
         </Style>
 
-        <DataTemplate x:Key="ChannelRowTemplate">
+        <DataTemplate x:Key="MonitorRowTemplate">
             <Grid Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="168"/>
+                    <ColumnDefinition Width="150"/>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="168"/>
+                    <ColumnDefinition Width="150"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" FontWeight="SemiBold"
+                           TextTrimming="CharacterEllipsis" Margin="0,0,10,0"/>
+                <ComboBox Grid.Column="1" ItemsSource="{Binding MonitorTargets}" DisplayMemberPath="Label"
+                          SelectedItem="{Binding SelectedMonitorTarget, Mode=TwoWay}"
+                          Height="30" VerticalAlignment="Center"/>
+                <Grid Grid.Column="2" Margin="12,0,4,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="44"/>
+                    </Grid.ColumnDefinitions>
+                    <Slider Minimum="0" Maximum="1" Value="{Binding MonitorVolume, Mode=TwoWay}"
+                            VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding MonitorVolume, StringFormat=P0}"
+                               TextAlignment="Right" VerticalAlignment="Center"
+                               Foreground="#A8B3C5" FontSize="11"/>
+                </Grid>
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="VirtualDeviceTemplate">
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
+                    <TextBlock Text="{Binding PlaybackName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding SuggestText}" Foreground="#8A97AC" FontSize="11" TextWrapping="Wrap"
+                               Margin="0,2,0,0"/>
+                </StackPanel>
+                <Button Grid.Column="1" Content="B出力として追加" Tag="{Binding}" Padding="12,6"
+                        VerticalAlignment="Center" Click="AddVirtualDeviceOutput_Click"
+                        Background="#30394A" Foreground="#F1F5F9" BorderThickness="0" Cursor="Hand"/>
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ChannelRowTemplate">
+            <Grid Margin="0,0,0,9">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="136"/>
+                    <ColumnDefinition Width="*" MinWidth="150"/>
+                    <ColumnDefinition Width="118"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
@@ -204,12 +323,24 @@
 
                 <ComboBox Grid.Column="1" ItemsSource="{Binding Options}"
                           SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
-                          DisplayMemberPath="Name" Height="30" VerticalAlignment="Center"/>
+                          DisplayMemberPath="Name" Height="30" VerticalAlignment="Center"
+                          Visibility="{Binding IsDeviceSource, Converter={StaticResource BoolToVisibility}}"/>
+
+                <Grid Grid.Column="1" Visibility="{Binding IsProcessSource, Converter={StaticResource BoolToVisibility}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding ProcessLabel}" VerticalAlignment="Center" Foreground="#C6D0DE"
+                               TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                    <Button Grid.Column="1" Content="変更" Padding="10,5" Click="ChangeProcessButton_Click"
+                            Background="#30394A" Foreground="#F1F5F9" BorderThickness="0" Cursor="Hand"/>
+                </Grid>
 
                 <Grid Grid.Column="2" Margin="12,0,4,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="44"/>
+                        <ColumnDefinition Width="40"/>
                     </Grid.ColumnDefinitions>
                     <Slider Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}"
                             VerticalAlignment="Center"/>
@@ -218,30 +349,56 @@
                                Foreground="#A8B3C5" FontSize="11"/>
                 </Grid>
 
-                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A1"
-                                  IsChecked="{Binding RouteA1, Mode=TwoWay}"/>
-                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A2"
-                                  IsChecked="{Binding RouteA2, Mode=TwoWay}"/>
-                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A3"
-                                  IsChecked="{Binding RouteA3, Mode=TwoWay}"/>
-                    <ToggleButton Style="{StaticResource RouteToggle}" Content="A4"
-                                  IsChecked="{Binding RouteA4, Mode=TwoWay}"/>
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                    <ToggleButton Style="{StaticResource MiniToggle}" Content="M" Background="#E0574F"
+                                  IsChecked="{Binding Muted, Mode=TwoWay}" ToolTip="ミュート"/>
+                    <ToggleButton Style="{StaticResource MiniToggle}" Content="S" Background="#E0A94F"
+                                  IsChecked="{Binding Solo, Mode=TwoWay}" ToolTip="ソロ（これだけを鳴らす）"/>
+                    <ToggleButton Style="{StaticResource MiniToggle}" Content="MON" Width="34" FontSize="9"
+                                  Background="#4FB0E0" ToolTip="マイクモニター（送り先は 設定 &gt; 音声 で選べます）"
+                                  IsChecked="{Binding MonitorEnabled, Mode=TwoWay}"/>
+                </StackPanel>
+
+                <ProgressBar Grid.Column="4" Style="{StaticResource Meter}" Value="{Binding Level}"
+                             Margin="10,0,0,0" VerticalAlignment="Center"/>
+
+                <ItemsControl Grid.Column="5" ItemsSource="{Binding Routes}" Margin="10,0,0,0" VerticalAlignment="Center">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <ToggleButton Style="{StaticResource RouteToggle}" Content="{Binding Label}"
+                                          IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                    <Button Style="{StaticResource RowActionButton}" Content="↑" Click="MoveInputUp_Click"
+                            ToolTip="上へ"/>
+                    <Button Style="{StaticResource RowActionButton}" Content="↓" Click="MoveInputDown_Click"
+                            ToolTip="下へ"/>
+                    <Button Style="{StaticResource RowActionButton}" Content="✕" Click="RemoveInput_Click"
+                            ToolTip="この入力を削除"/>
                 </StackPanel>
             </Grid>
         </DataTemplate>
 
         <DataTemplate x:Key="OutputRowTemplate">
-            <Grid Margin="0,0,0,8">
+            <Grid Margin="0,0,0,9">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="168"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="168"/>
+                    <ColumnDefinition Width="136"/>
+                    <ColumnDefinition Width="*" MinWidth="160"/>
+                    <ColumnDefinition Width="118"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
                     <TextBox Style="{StaticResource NameBox}" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                              ToolTip="クリックして名前を変更できます"/>
-                    <TextBlock Text="H/W出力" Foreground="#7D8AA0" FontSize="11" Margin="0,1,0,0"/>
+                    <TextBlock Text="{Binding KindLabel}" Foreground="#7D8AA0" FontSize="11" Margin="0,1,0,0"/>
                 </StackPanel>
                 <ComboBox Grid.Column="1" ItemsSource="{Binding Options}"
                           SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
@@ -249,7 +406,7 @@
                 <Grid Grid.Column="2" Margin="12,0,4,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="44"/>
+                        <ColumnDefinition Width="40"/>
                     </Grid.ColumnDefinitions>
                     <Slider Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}"
                             VerticalAlignment="Center"/>
@@ -257,6 +414,14 @@
                                TextAlignment="Right" VerticalAlignment="Center"
                                Foreground="#A8B3C5" FontSize="11"/>
                 </Grid>
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                    <Button Style="{StaticResource RowActionButton}" Content="↑" Click="MoveOutputUp_Click"
+                            ToolTip="上へ"/>
+                    <Button Style="{StaticResource RowActionButton}" Content="↓" Click="MoveOutputDown_Click"
+                            ToolTip="下へ"/>
+                    <Button Style="{StaticResource RowActionButton}" Content="✕" Click="RemoveOutput_Click"
+                            ToolTip="この出力を削除"/>
+                </StackPanel>
             </Grid>
         </DataTemplate>
     </Window.Resources>
@@ -274,8 +439,8 @@
                            Foreground="#66748C" Margin="0,0,0,4"/>
                 <TextBlock Text="PulseWeaver" FontSize="30" FontWeight="Bold"/>
             </DockPanel>
-            <TextBlock Text="入力・バーチャル入力を 4 つの出力へ振り分けるミキサー"
-                       Foreground="#A8B3C5" Margin="0,5,0,0"/>
+            <TextBlock Text="マイク・バーチャル入力・アプリを、物理出力（A）と仮想出力（B）へ振り分けて同時に再生します"
+                       Foreground="#A8B3C5" Margin="0,5,0,0" TextWrapping="Wrap"/>
         </StackPanel>
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,16">
@@ -307,28 +472,49 @@
                     <StackPanel>
                         <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                             <StackPanel>
-                                <TextBlock Text="H/W入力（6）" Style="{StaticResource SectionTitle}"/>
-                                <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,10"
-                                           Text="マイクやライン入力などの録音デバイスを選択します。"/>
-                                <ItemsControl x:Name="HardwareInputList" ItemTemplate="{StaticResource ChannelRowTemplate}"/>
-                            </StackPanel>
-                        </Border>
-
-                        <Border Style="{StaticResource Card}" Margin="0,0,0,12">
-                            <StackPanel>
-                                <TextBlock Text="バーチャル入力（3）" Style="{StaticResource SectionTitle}"/>
-                                <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,10"
-                                           Text="指定した再生デバイスに流れる音をループバックで取り込みます。Discord の出力先を別デバイスにしておくと個別に扱えます。"/>
-                                <ItemsControl x:Name="VirtualInputList" ItemTemplate="{StaticResource ChannelRowTemplate}"/>
+                                <DockPanel>
+                                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                                        <Button Content="＋ マイク" Padding="12,6" Margin="0,0,6,0" Click="AddHardwareInput_Click"
+                                                Style="{StaticResource SecondaryButton}" ToolTip="マイク・ライン入力を追加"/>
+                                        <Button Content="＋ バーチャル" Padding="12,6" Margin="0,0,6,0" Click="AddLoopbackInput_Click"
+                                                Style="{StaticResource SecondaryButton}" ToolTip="再生デバイスの音をループバックで取り込む入力を追加"/>
+                                        <Button Content="＋ アプリ" Padding="12,6" Click="AddProcessInput_Click"
+                                                Style="{StaticResource SecondaryButton}" ToolTip="特定のアプリの音だけを取り込む入力を追加"/>
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <TextBlock x:Name="InputSectionTitle" Text="入力" Style="{StaticResource SectionTitle}"
+                                                   Margin="0,0,0,4"/>
+                                        <TextBlock Style="{StaticResource Caption}"
+                                                   Text="マイク・バーチャル入力・アプリをそれぞれの音量で混ぜ、出力ごとに振り分けます。"/>
+                                    </StackPanel>
+                                </DockPanel>
+                                <ItemsControl x:Name="InputList" ItemTemplate="{StaticResource ChannelRowTemplate}"
+                                              Margin="0,14,0,0"/>
+                                <TextBlock x:Name="InputEmptyText" Style="{StaticResource Caption}" Visibility="Collapsed"
+                                           Text="入力がありません。右上のボタンから追加してください。"/>
                             </StackPanel>
                         </Border>
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <TextBlock Text="H/W出力（4）" Style="{StaticResource SectionTitle}"/>
-                                <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,10"
-                                           Text="A1〜A4 の出力先を選びます。CABLE Input などを選ぶと Discord からマイクとして扱えます。"/>
-                                <ItemsControl x:Name="HardwareOutputList" ItemTemplate="{StaticResource OutputRowTemplate}"/>
+                                <DockPanel>
+                                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+                                        <Button Content="＋ 物理出力" Padding="12,6" Margin="0,0,6,0" Click="AddPhysicalOutput_Click"
+                                                Style="{StaticResource SecondaryButton}" ToolTip="スピーカーやヘッドホンなどの出力を追加"/>
+                                        <Button Content="＋ 仮想出力" Padding="12,6" Click="AddVirtualOutput_Click"
+                                                Style="{StaticResource SecondaryButton}" ToolTip="CABLE Input などを選ぶ出力を追加（アプリへ送る用）"/>
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <TextBlock x:Name="OutputSectionTitle" Text="出力" Style="{StaticResource SectionTitle}"
+                                                   Margin="0,0,0,4"/>
+                                        <TextBlock Style="{StaticResource Caption}"
+                                                   Text="A は物理出力、B は仮想出力です。仮想出力を CABLE Input などにすると、その受け側のアプリからマイクとして扱えます。"/>
+                                    </StackPanel>
+                                </DockPanel>
+                                <ItemsControl x:Name="OutputList" ItemTemplate="{StaticResource OutputRowTemplate}"
+                                              Margin="0,14,0,0"/>
+                                <TextBlock x:Name="OutputEmptyText" Style="{StaticResource Caption}" Visibility="Collapsed"
+                                           Text="出力がありません。右上のボタンから追加してください。"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -402,7 +588,7 @@
 
                         <StackPanel x:Name="AudioSettingsPanel" Visibility="Collapsed">
                             <TextBlock Text="音声" Style="{StaticResource SectionTitle}"/>
-                            <Border Style="{StaticResource Card}">
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                                 <StackPanel>
                                     <TextBlock Text="出力バッファ（レイテンシ）" Foreground="#C6D0DE"/>
                                     <ComboBox x:Name="LatencyCombo" Margin="0,6,0,0" Height="34" Width="220"
@@ -414,7 +600,29 @@
                                     <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
                                                Text="小さいほど遅延は減りますが、音切れが起きやすくなります。次回ミックス開始時に反映されます。"/>
                                     <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
-                                               Text="音量と A1〜A4 の振り分けは動作中でも即時反映されます。デバイスの変更は「停止」してから再度「ミックス開始」してください。"/>
+                                               Text="音量・ミュート・ソロ・振り分けは動作中でも即時反映されます。デバイスの変更は「停止」してから再度「ミックス開始」してください。"/>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="検出した仮想デバイス" Style="{StaticResource SectionTitle}" Margin="0,6,0,8"/>
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,10"
+                                               Text="VB-CABLE / VoiceMeeter / SYNCROOM などを自動で見つけます。「B出力として追加」を押すと仮想出力として登録され、受け側のアプリ（Discord など）からマイクとして扱えるようになります。"/>
+                                    <ItemsControl x:Name="VirtualDeviceList" ItemTemplate="{StaticResource VirtualDeviceTemplate}"/>
+                                    <TextBlock x:Name="VirtualDeviceEmptyText" Style="{StaticResource Caption}"
+                                               Text="仮想オーディオデバイスが見つかりません。VB-CABLE などをインストールすると表示されます。"/>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="マイクモニター" Style="{StaticResource SectionTitle}" Margin="0,6,0,8"/>
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,10"
+                                               Text="自分の声を確認したい入力を、送り先の出力と専用の音量でモニターできます。入力の「MON」ボタンで有効にします。"/>
+                                    <ItemsControl x:Name="MonitorList" ItemTemplate="{StaticResource MonitorRowTemplate}"/>
+                                    <TextBlock x:Name="MonitorEmptyText" Style="{StaticResource Caption}"
+                                               Text="モニターできる入力（マイク・バーチャル入力）がありません。"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
