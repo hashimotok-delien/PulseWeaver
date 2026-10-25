@@ -244,6 +244,42 @@ h2{
   z-index:999;
 }
 
+/* ポートフォリオへ戻る */
+.back-link{
+  position:fixed;
+  top:20px;
+  left:20px;
+  z-index:1000;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:10px 18px;
+  border:1px solid rgba(var(--accent-rgb),0.45);
+  border-radius:999px;
+  background:rgba(10,10,15,0.75);
+  backdrop-filter:blur(10px);
+  color:var(--text);
+  font-size:0.9rem;
+  font-weight:600;
+  text-decoration:none;
+  transition:0.3s;
+}
+
+.back-link:hover{
+  background:rgba(var(--accent-rgb),0.15);
+  box-shadow:0 0 20px rgba(var(--accent-rgb),0.4);
+  transform:translateX(-2px);
+}
+
+@media (max-width:600px){
+  .back-link{
+    top:12px;
+    left:12px;
+    padding:8px 14px;
+    font-size:0.8rem;
+  }
+}
+
 /* スクロールバー */
 ::-webkit-scrollbar{
   width:8px;
@@ -288,6 +324,8 @@ h2{
 <body>
 <div id="page-transition"></div>
 <div id="progress-bar"></div>
+
+<a class="back-link" href="../">← ポートフォリオに戻る</a>
 
 <header>
   <picture>
@@ -378,10 +416,6 @@ h2{
     </picture>
   </div>
 </section>
-
-<div style="position:fixed; top:20px; left:20px;">
-  <a href="../" class="btn">← 戻る</a>
-</div>
 
 <div class="fixed-cta">
   <a href="<?= $DOWNLOAD_URL ?>" class="btn" target="_blank" rel="noopener">ダウンロード</a>
