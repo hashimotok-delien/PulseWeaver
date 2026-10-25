@@ -1,0 +1,97 @@
+name: Sync Web/Docs to Central Repository
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'web/public/**' # 公開ページのフォルダ変更時のみ実行
+      - '.github/workflows/copy_web.yml' # ワークフロー定義ファイルの変更時にも実行
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout Source Repository (A)
+        uses: actions/checkout@v4
+        with:
+          path: src
+          
+      - name: 2. Extract and Lowercase Repository Name
+        id: repo_name_step
+        run: |
+          REPO_NAME_LOWERCASE=$(basename $GITHUB_REPOSITORY | tr '[:upper:]' '[:lower:]')
+          echo "repo_name=$REPO_NAME_LOWERCASE" >> $GITHUB_OUTPUT
+
+      - name: 3. Checkout Destination Repository (Doc Hub)
+        uses: actions/checkout@v4
+        with:
+          repository: hashimotok-delien/hmk.delien.xyz
+          token: ${{ secrets.GH_TOKEN }}
+          path: doc-hub
+
+      - name: 4. Sync web/public/cultivate and web/docs/cultivate
+        env:
+          REPO_NAME: ${{ steps.repo_name_step.outputs.repo_name }}
+        run: |
+          set -euo pipefail
+
+          # web/ の構成をそのまま doc-hub 側へマージする
+          SRC_ROOT="./src/web"
+          DEST_ROOT="./doc-hub"
+
+          if [ -z "$REPO_NAME" ]; then
+            echo "❌ リポジトリ名を取得できませんでした。"
+            exit 1
+          fi
+
+          # ---- (1) web/public/<repo> → public/<repo> ----
+          # 公開ページ。フォルダごと置き換える。
+          if [ ! -d "$SRC_ROOT/public/$REPO_NAME" ]; then
+            echo "⚠️  $SRC_ROOT/public/$REPO_NAME が見つかりません。スキップします。"
+          else
+            rm -rf "$DEST_ROOT/public/$REPO_NAME"
+            mkdir -p "$DEST_ROOT/public/$REPO_NAME"
+            cp -r "$SRC_ROOT/public/$REPO_NAME/." "$DEST_ROOT/public/$REPO_NAME/"
+            echo "✅ $SRC_ROOT/public/$REPO_NAME → public/$REPO_NAME"
+          fi
+
+          # ---- (2) web/docs/<repo> → docs/<repo> ----
+          # docs/ 直下には他Botのドキュメントもあるため、
+          # docs/<repo> のみを置き換える（docs/ 自体は消さない）。
+          if [ ! -d "$SRC_ROOT/docs/$REPO_NAME" ]; then
+            echo "⚠️  $SRC_ROOT/docs/$REPO_NAME が見つかりません。スキップします。"
+          else
+            rm -rf "$DEST_ROOT/docs/$REPO_NAME"
+            mkdir -p "$DEST_ROOT/docs/$REPO_NAME"
+            cp -r "$SRC_ROOT/docs/$REPO_NAME/." "$DEST_ROOT/docs/$REPO_NAME/"
+            echo "✅ $SRC_ROOT/docs/$REPO_NAME → docs/$REPO_NAME"
+          fi
+
+          echo "---- doc-hub/public 直下（他Botの公開ページは保持） ----"
+          ls -1 "$DEST_ROOT/public"
+          echo "---- doc-hub/docs 直下（他Botのドキュメントは保持） ----"
+          ls -1 "$DEST_ROOT/docs"
+
+      - name: 5. Commit and Push Changes
+        env:
+          # 前回エラーを回避するため、認証情報付きのURLを使用 (PAT権限必須)
+          TARGET_REPO_URL: "https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/hashimotok-delien/hmk.delien.xyz.git"
+        run: |
+          cd doc-hub
+          git config user.name "GitHub Actions Sync (${{ steps.repo_name_step.outputs.repo_name }})"
+          git config user.email "actions@github.com"
+          
+          # 変更がないか確認し、あればコミットしてプッシュ
+          if git status --porcelain | grep .; then
+            git add .
+            git commit -m "Sync: Updated web/docs from ${{ github.repository }} (commit ${{ github.sha }})"
+            
+            # ★ トークン埋め込みURLでプッシュを強制
+            git push $TARGET_REPO_URL
+            
+            echo "✅ Successfully pushed changes to hashimotok.docs."
+          else
+            echo "ℹ️ No changes found in the documentation repository."
+          fi
