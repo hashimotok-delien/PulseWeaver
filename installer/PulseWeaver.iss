@@ -1,9 +1,9 @@
 ; PulseWeaver インストーラ（Inno Setup 6）
-; ビルド例: ISCC.exe /DVERSION=0.1.0 installer\PulseWeaver.iss
+; ビルド例: ISCC.exe /DVERSION=0.1.1 installer\PulseWeaver.iss
 ; 事前に dist\publish へ dotnet publish しておくこと。
 
 #ifndef VERSION
-  #define VERSION "0.1.0"
+  #define VERSION "0.1.1"
 #endif
 
 #define AppName "PulseWeaver"

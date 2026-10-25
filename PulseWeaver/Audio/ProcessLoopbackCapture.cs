@@ -8,6 +8,11 @@ namespace PulseWeaver;
 /// 指定したアプリ（プロセスツリー）が再生している音だけを取り込む入力ソース。
 /// Windows 11（Build 20348 以降）の Application Loopback を使用する。
 /// </summary>
+/// <remarks>
+/// Application Loopback の IAudioClient は生成元のアパートメントに縛られ、
+/// 別アパートメント（UI スレッド = STA など）から触ると E_NOINTERFACE で失敗する。
+/// そのため生成から解放までを 1 本の MTA ワーカースレッドに閉じ込めている。
+/// </remarks>
 internal sealed class ProcessLoopbackCapture : IInputCapture
 {
     private const string VirtualAudioDeviceProcessLoopback = @"VAD\Process_Loopback";
@@ -30,15 +35,23 @@ internal sealed class ProcessLoopbackCapture : IInputCapture
     private static readonly Guid SubTypeIeeeFloat = new("00000003-0000-0010-8000-00AA00389B71");
 
     private readonly int _processId;
+    private readonly ManualResetEventSlim _ready = new(false);
+    private readonly ManualResetEventSlim _startRequested = new(false);
+    private readonly ManualResetEventSlim _startCompleted = new(false);
+    private readonly ManualResetEventSlim _idle = new(true);
     private IAudioClient? _audioClient;
     private IAudioCaptureClient? _captureClient;
-    private Thread? _thread;
+    private Thread? _worker;
+    private Exception? _initError;
+    private Exception? _startError;
+    private volatile bool _started;
+    private volatile bool _exited;
     private volatile bool _running;
     private volatile bool _stopRequested;
     private byte[] _buffer = new byte[BytesPerFrame * 4096];
     private byte[] _silence = new byte[BytesPerFrame * 4096];
     private long _lastAliveCheck = Environment.TickCount64;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     public ProcessLoopbackCapture(int processId, bool includeProcessTree)
     {
@@ -60,7 +73,26 @@ internal sealed class ProcessLoopbackCapture : IInputCapture
                 new ArgumentException("processId must be positive."));
         }
 
-        Activate(processId, includeProcessTree);
+        _worker = new Thread(WorkerLoop)
+        {
+            IsBackground = true,
+            Name = $"ProcessLoopback-{processId}"
+        };
+        _worker.SetApartmentState(ApartmentState.MTA);
+        _worker.Start();
+
+        if (!_ready.Wait(TimeSpan.FromSeconds(15)))
+        {
+            _stopRequested = true;
+            throw new AudioStartupException(
+                "アプリ単位の取り込みを開始できませんでした（応答がありません）。",
+                new TimeoutException("Process loopback initialization timed out."));
+        }
+
+        if (_initError is not null)
+        {
+            throw _initError;
+        }
     }
 
     public bool IncludeProcessTree { get; }
@@ -76,36 +108,123 @@ internal sealed class ProcessLoopbackCapture : IInputCapture
     public void StartRecording()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_thread is not null)
+        if (_started || _exited)
         {
             return;
         }
 
-        var hr = _audioClient!.Start();
-        Marshal.ThrowExceptionForHR(hr);
+        _started = true;
+        _startError = null;
+        _startCompleted.Reset();
+        _startRequested.Set();
 
-        _stopRequested = false;
-        _running = true;
-        _thread = new Thread(CaptureLoop)
+        if (!_startCompleted.Wait(TimeSpan.FromSeconds(10)))
         {
-            IsBackground = true,
-            Name = $"ProcessLoopback-{_processId}"
-        };
-        _thread.Start();
+            throw new AudioStartupException(
+                "アプリ単位の取り込みを開始できませんでした（応答がありません）。",
+                new TimeoutException("Process loopback start timed out."));
+        }
+
+        if (_startError is not null)
+        {
+            _started = false;
+            throw _startError is AudioStartupException
+                ? _startError
+                : new AudioStartupException(
+                    $"アプリ単位の取り込みを開始できませんでした。{AudioErrorDescriber.Describe(_startError)}",
+                    _startError);
+        }
     }
 
     public void StopRecording()
     {
+        _started = false;
         _stopRequested = true;
         _running = false;
+        _idle.Wait(2000);
+    }
 
-        var thread = _thread;
-        _thread = null;
-        if (thread is not null)
+    private void WorkerLoop()
+    {
+        try
         {
-            thread.Join(1000);
+            try
+            {
+                Activate(_processId, IncludeProcessTree);
+            }
+            catch (Exception exception)
+            {
+                _initError = exception is AudioStartupException
+                    ? exception
+                    : new AudioStartupException(
+                        $"アプリ単位の取り込みを初期化できませんでした。{AudioErrorDescriber.Describe(exception)}",
+                        exception);
+                return;
+            }
+
+            _ready.Set();
+
+            while (true)
+            {
+                if (_disposed)
+                {
+                    break;
+                }
+
+                if (!_startRequested.Wait(100))
+                {
+                    continue;
+                }
+
+                _startRequested.Reset();
+                if (_disposed)
+                {
+                    break;
+                }
+
+                RunCapture();
+                _idle.Set();
+            }
+        }
+        finally
+        {
+            _exited = true;
+            _ready.Set();
+            _startCompleted.Set();
+            ReleaseComObjects();
+            _idle.Set();
+        }
+    }
+
+    private void RunCapture()
+    {
+        if (_disposed)
+        {
+            return;
         }
 
+        _idle.Reset();
+        _stopRequested = false;
+        _lastAliveCheck = Environment.TickCount64;
+
+        try
+        {
+            var hr = _audioClient!.Start();
+            Marshal.ThrowExceptionForHR(hr);
+        }
+        catch (Exception exception)
+        {
+            _startError = exception;
+            _startCompleted.Set();
+            return;
+        }
+
+        _running = true;
+        _startCompleted.Set();
+
+        CaptureLoop();
+
+        _running = false;
         try
         {
             _audioClient?.Stop();
@@ -113,6 +232,37 @@ internal sealed class ProcessLoopbackCapture : IInputCapture
         catch (Exception exception)
         {
             AppLog.Error("アプリ単位の取り込みを停止できませんでした。", exception);
+        }
+    }
+
+    private void ReleaseComObjects()
+    {
+        if (_captureClient is not null)
+        {
+            try
+            {
+                Marshal.ReleaseComObject(_captureClient);
+            }
+            catch (Exception)
+            {
+                // 解放できなくても続行する
+            }
+
+            _captureClient = null;
+        }
+
+        if (_audioClient is not null)
+        {
+            try
+            {
+                Marshal.ReleaseComObject(_audioClient);
+            }
+            catch (Exception)
+            {
+                // 解放できなくても続行する
+            }
+
+            _audioClient = null;
         }
     }
 
@@ -347,38 +497,25 @@ internal sealed class ProcessLoopbackCapture : IInputCapture
         }
 
         _disposed = true;
+        _started = false;
+        _stopRequested = true;
         _running = false;
+        _startRequested.Set();
 
-        var thread = _thread;
-        _thread = null;
+        var worker = _worker;
+        _worker = null;
+        if (worker is null || worker == Thread.CurrentThread)
+        {
+            return;
+        }
+
         try
         {
-            thread?.Join(1000);
+            worker.Join(3000);
         }
         catch (Exception exception)
         {
             AppLog.Error("取り込みスレッドの終了を待てませんでした。", exception);
-        }
-
-        try
-        {
-            _audioClient?.Stop();
-        }
-        catch (Exception)
-        {
-            // 停止済みの場合は無視してよい
-        }
-
-        if (_captureClient is not null)
-        {
-            Marshal.ReleaseComObject(_captureClient);
-            _captureClient = null;
-        }
-
-        if (_audioClient is not null)
-        {
-            Marshal.ReleaseComObject(_audioClient);
-            _audioClient = null;
         }
     }
 
