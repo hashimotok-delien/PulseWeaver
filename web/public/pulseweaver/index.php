@@ -290,7 +290,10 @@ h2{
 <div id="progress-bar"></div>
 
 <header>
-  <img src="<?= $ICON_PATH ?>" alt="<?= $PRODUCT_NAME ?> のアイコン">
+  <picture>
+    <source srcset="./assets/img/icon-120.webp?v=<?= @filemtime(__DIR__ . '/assets/img/icon-120.webp') ?: time() ?> 1x, ./assets/img/icon.webp?v=<?= @filemtime(__DIR__ . '/assets/img/icon.webp') ?: time() ?> 2x" type="image/webp">
+    <img src="./assets/img/icon.png?v=<?= @filemtime(__DIR__ . '/assets/img/icon.png') ?: time() ?>" alt="<?= $PRODUCT_NAME ?> のアイコン" width="120" height="120" decoding="async">
+  </picture>
   <h1><?= $PRODUCT_NAME ?></h1>
   <div class="tagline">音を混ぜて、好きな場所へ。</div>
   <div class="benefit">H/W入力6・バーチャル入力3・出力4。Windowsで動く無料のオーディオミキサーです。</div>
@@ -349,14 +352,30 @@ h2{
 
   <div class="card">
     <p><strong>ミキサー画面</strong>：上からH/W入力6・バーチャル入力3・H/W出力4。行ごとにデバイスと音量、右端のA1〜A4で振り分けを指定します。</p>
-    <img src="./assets/img/screenshot-1.png" alt="PulseWeaver のミキサー画面。H/W入力・バーチャル入力・H/W出力の一覧と音量スライダーが並んでいる"
-         style="width:100%; border-radius:12px; box-shadow:0 0 20px rgba(var(--accent-rgb),0.3);" loading="lazy">
+    <picture>
+      <source type="image/webp"
+              srcset="./assets/img/screenshot-1-600.webp?v=<?= @filemtime(__DIR__ . '/assets/img/screenshot-1-600.webp') ?: time() ?> 600w,
+                      ./assets/img/screenshot-1-900.webp?v=<?= @filemtime(__DIR__ . '/assets/img/screenshot-1-900.webp') ?: time() ?> 900w,
+                      ./assets/img/screenshot-1-1200.webp?v=<?= @filemtime(__DIR__ . '/assets/img/screenshot-1-1200.webp') ?: time() ?> 1200w"
+              sizes="(max-width: 1060px) calc(100vw - 90px), 900px">
+      <img src="./assets/img/screenshot-1.png?v=<?= @filemtime(__DIR__ . '/assets/img/screenshot-1.png') ?: time() ?>" alt="PulseWeaver のミキサー画面。H/W入力・バーチャル入力・H/W出力の一覧と音量スライダーが並んでいる"
+           width="1200" height="980" loading="lazy" decoding="async"
+           style="width:100%; height:auto; border-radius:12px; box-shadow:0 0 20px rgba(var(--accent-rgb),0.3);">
+    </picture>
   </div>
 
   <div class="card">
     <p><strong>設定・更新情報</strong>：起動時の動作や出力バッファ、構成の保存・切替、アップデートの確認ができます。各リリースの変更内容もその場で確認できます。</p>
-    <img src="./assets/img/screenshot-2.png" alt="PulseWeaver の設定画面。一般・音声・構成・更新情報・このアプリについてのメニューがある"
-         style="width:100%; border-radius:12px; box-shadow:0 0 20px rgba(var(--accent-rgb),0.3);" loading="lazy">
+    <picture>
+      <source type="image/webp"
+              srcset="./assets/img/screenshot-2-600.webp?v=<?= @filemtime(__DIR__ . '/assets/img/screenshot-2-600.webp') ?: time() ?> 600w,
+                      ./assets/img/screenshot-2-900.webp?v=<?= @filemtime(__DIR__ . '/assets/img/screenshot-2-900.webp') ?: time() ?> 900w,
+                      ./assets/img/screenshot-2-1200.webp?v=<?= @filemtime(__DIR__ . '/assets/img/screenshot-2-1200.webp') ?: time() ?> 1200w"
+              sizes="(max-width: 1060px) calc(100vw - 90px), 900px">
+      <img src="./assets/img/screenshot-2.png?v=<?= @filemtime(__DIR__ . '/assets/img/screenshot-2.png') ?: time() ?>" alt="PulseWeaver の設定画面。一般・音声・構成・更新情報・このアプリについてのメニューがある"
+           width="1200" height="980" loading="lazy" decoding="async"
+           style="width:100%; height:auto; border-radius:12px; box-shadow:0 0 20px rgba(var(--accent-rgb),0.3);">
+    </picture>
   </div>
 </section>
 

@@ -32,6 +32,8 @@ $DOWNLOAD_URL = 'https://github.com/hashimotok-delien/PulseWeaver/releases';
 $SUPPORT_URL = 'https://github.com/hashimotok-delien/PulseWeaver/issues';
 
 // ヘッダーのアイコン画像。assets/img/ に置き、商品ルートからの相対パスで書く
+// （ランディングは icon-120.webp / icon.webp / icon.png を <picture> で出し分けるため
+//   $ICON_PATH は og:image など別用途で使う場合のみ参照される）
 $ICON_PATH = './assets/img/icon.png';
 
 // アクセント色の RGB 値。「R,G,B」形式で、CSS の rgba(var(--accent-rgb), .x) と揃える

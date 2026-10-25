@@ -3,6 +3,36 @@
    アクセント色を変えるときは --accent と --accent-rgb を両方更新する
    ============================================================ */
 
+/* ============================================================
+   セルフホストフォント（日本語サブセット）
+   public/<slug>/plans/css/style.css からの相対パスで
+   ドキュメントルートの assets/fonts/ を参照する
+   フォントを差し替えたときは tools/build_fonts.py で再生成する
+   ============================================================ */
+@font-face {
+  font-family: 'Noto Sans JP';
+  src: url("../../../assets/fonts/noto-sans-jp-400.woff2?v=1") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Noto Sans JP';
+  src: url("../../../assets/fonts/noto-sans-jp-600.woff2?v=1") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Noto Sans JP';
+  src: url("../../../assets/fonts/noto-sans-jp-700.woff2?v=1") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg-primary: #0a0a0f;
   --bg-card: rgba(18, 18, 26, 0.72);
@@ -40,6 +70,13 @@ a {
 
 a:hover {
   text-decoration: underline;
+}
+
+/* 本文中のリンクは色だけに頼らず下線でも区別する（WCAG 1.4.1） */
+main a:not(.btn),
+.site-footer a {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
 }
 
 /* ---------- ヘッダー ---------- */
