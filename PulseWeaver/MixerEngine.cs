@@ -60,7 +60,7 @@ internal sealed class MixerEngine : IDisposable
                         Label = outputs[i].Label,
                         Device = device,
                         MixFormat = device.AudioClient.MixFormat,
-                        Volume = Math.Clamp(outputs[i].Volume, 0f, 1f)
+                        Volume = (float)Math.Clamp(outputs[i].Volume, 0f, MixerLimits.MaxVolume)
                     };
                 }
                 catch (Exception exception)
@@ -188,6 +188,23 @@ internal sealed class MixerEngine : IDisposable
         return levels;
     }
 
+    /// <summary>出力ごとのピーク値（0〜1）。読み出すと 0 にリセットされる。</summary>
+    public float[] GetOutputLevels()
+    {
+        var levels = new float[_outputTargets.Length];
+        for (var i = 0; i < _outputTargets.Length; i++)
+        {
+            if (_outputTargets[i]?.Meter is not { } meter)
+            {
+                continue;
+            }
+
+            levels[i] = meter.ConsumePeak();
+        }
+
+        return levels;
+    }
+
     public void SetInputVolume(int inputIndex, float volume)
     {
         if (!TryGetInput(inputIndex, out var input))
@@ -195,7 +212,7 @@ internal sealed class MixerEngine : IDisposable
             return;
         }
 
-        input.Volume = Math.Clamp(volume, 0f, 1f);
+        input.Volume = (float)Math.Clamp(volume, 0f, MixerLimits.MaxVolume);
         ApplyAllGains();
     }
 
@@ -228,7 +245,7 @@ internal sealed class MixerEngine : IDisposable
             return;
         }
 
-        input.MonitorVolume = Math.Clamp(volume, 0f, 1f);
+        input.MonitorVolume = (float)Math.Clamp(volume, 0f, MixerLimits.MaxVolume);
         ApplyAllGains();
     }
 
@@ -250,7 +267,7 @@ internal sealed class MixerEngine : IDisposable
             return;
         }
 
-        target.Volume = Math.Clamp(volume, 0f, 1f);
+        target.Volume = (float)Math.Clamp(volume, 0f, MixerLimits.MaxVolume);
         if (target.Master is not null)
         {
             target.Master.Volume = target.Volume;
@@ -357,11 +374,11 @@ internal sealed class MixerEngine : IDisposable
             Buffers = buffers,
             Gains = gains,
             Routes = new Dictionary<string, bool>(definition.Routes, StringComparer.Ordinal),
-            Volume = Math.Clamp(definition.Volume, 0f, 1f),
+            Volume = (float)Math.Clamp(definition.Volume, 0f, MixerLimits.MaxVolume),
             Muted = definition.Muted,
             Solo = definition.Solo,
             MonitorOutputId = definition.MonitorOutputId,
-            MonitorVolume = Math.Clamp(definition.MonitorVolume, 0f, 1f),
+            MonitorVolume = (float)Math.Clamp(definition.MonitorVolume, 0f, MixerLimits.MaxVolume),
             ProcessName = definition.ProcessName,
             IncludeProcessTree = definition.IncludeProcessTree,
             ProcessId = definition.ProcessId ?? 0
@@ -556,8 +573,9 @@ internal sealed class MixerEngine : IDisposable
             {
                 var mixer = new MixingSampleProvider(gains) { ReadFully = true };
                 target.Master = new VolumeSampleProvider(mixer) { Volume = target.Volume };
+                target.Meter = new OutputLevelMeter(target.Master);
                 var output = new WasapiOut(target.Device, AudioClientShareMode.Shared, true, Math.Clamp(outputLatencyMs, 20, 500));
-                output.Init(CreateOutputWaveProvider(target.Master, target.MixFormat));
+                output.Init(CreateOutputWaveProvider(target.Meter, target.MixFormat));
                 target.Output = output;
                 AppLog.Info($"{target.Label} の出力: {target.Device.FriendlyName} ({target.MixFormat}), 入力 {gains.Length} 件");
             }
@@ -733,6 +751,8 @@ internal sealed class MixerEngine : IDisposable
         public required float Volume { get; set; }
 
         public VolumeSampleProvider? Master { get; set; }
+
+        public OutputLevelMeter? Meter { get; set; }
 
         public WasapiOut? Output { get; set; }
     }

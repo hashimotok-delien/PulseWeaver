@@ -1,0 +1,43 @@
+<Window x:Class="PulseWeaver.DevicePickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="デバイスを選択"
+        Height="560" Width="520"
+        Background="#10141C" Foreground="#F1F5F9"
+        WindowStartupLocation="CenterOwner"
+        x:ClassModifier="internal">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="HeadingText" Grid.Row="0" FontSize="19" FontWeight="SemiBold"/>
+        <TextBlock x:Name="DescriptionText" Grid.Row="1" Foreground="#A8B3C5" TextWrapping="Wrap"
+                   Margin="0,8,0,14"/>
+
+        <Border Grid.Row="2" Background="#1B2230" CornerRadius="10" Padding="6">
+            <ListBox x:Name="DeviceList" Background="Transparent" BorderThickness="0" Foreground="#F1F5F9"
+                     DisplayMemberPath="Name" HorizontalContentAlignment="Stretch"
+                     MouseDoubleClick="DeviceList_MouseDoubleClick"/>
+        </Border>
+
+        <TextBlock x:Name="DeviceStatusText" Grid.Row="3" Foreground="#8A97AC" FontSize="11" Margin="0,10,0,0"/>
+
+        <DockPanel Grid.Row="4" Margin="0,14,0,0">
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                <Button x:Name="SelectButton" Content="このデバイスを使う" Padding="16,8" Margin="0,0,8,0"
+                        Background="#4F7DFF" Foreground="White" BorderThickness="0" FontWeight="SemiBold"
+                        Cursor="Hand" Click="SelectButton_Click"/>
+                <Button Content="キャンセル" Padding="16,8" Background="#30394A" Foreground="#F1F5F9"
+                        BorderThickness="0" Cursor="Hand" Click="CancelButton_Click"/>
+            </StackPanel>
+            <Button Content="再スキャン" Padding="16,8" Background="#30394A" Foreground="#F1F5F9"
+                    BorderThickness="0" Cursor="Hand" HorizontalAlignment="Left"
+                    Click="RefreshButton_Click" ToolTip="接続したデバイスを探し直します"/>
+        </DockPanel>
+    </Grid>
+</Window>

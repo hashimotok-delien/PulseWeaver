@@ -135,8 +135,12 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
 
             _config.DeviceId = id;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(SelectedDeviceLabel));
         }
     }
+
+    /// <summary>デバイス変更ボタンに表示する名前。</summary>
+    public string SelectedDeviceLabel => SelectedDevice?.Name ?? "（なし）";
 
     public string ProcessLabel => string.IsNullOrWhiteSpace(_config.ProcessName)
         ? "（アプリ未選択）"
@@ -147,7 +151,7 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
         get => _config.Volume;
         set
         {
-            var clamped = Math.Clamp(value, 0d, 1d);
+            var clamped = Math.Clamp(value, 0d, MixerLimits.MaxVolume);
             if (Math.Abs(clamped - _config.Volume) < 0.0001)
             {
                 return;
@@ -286,7 +290,7 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
         get => _config.MonitorVolume;
         set
         {
-            var clamped = Math.Clamp(value, 0d, 1d);
+            var clamped = Math.Clamp(value, 0d, MixerLimits.MaxVolume);
             if (Math.Abs(clamped - _config.MonitorVolume) < 0.0001)
             {
                 return;
@@ -357,6 +361,7 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
 internal sealed class MixerOutputRow : INotifyPropertyChanged
 {
     private readonly MixerOutputConfig _config;
+    private double _level;
 
     public MixerOutputRow(
         int index,
@@ -417,21 +422,41 @@ internal sealed class MixerOutputRow : INotifyPropertyChanged
 
             _config.DeviceId = id;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(SelectedDeviceLabel));
         }
     }
+
+    /// <summary>デバイス変更ボタンに表示する名前。</summary>
+    public string SelectedDeviceLabel => SelectedDevice?.Name ?? "（なし）";
 
     public double Volume
     {
         get => _config.Volume;
         set
         {
-            var clamped = Math.Clamp(value, 0d, 1d);
+            var clamped = Math.Clamp(value, 0d, MixerLimits.MaxVolume);
             if (Math.Abs(clamped - _config.Volume) < 0.0001)
             {
                 return;
             }
 
             _config.Volume = clamped;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>出力レベルメーター表示用（0〜1）。</summary>
+    public double Level
+    {
+        get => _level;
+        set
+        {
+            if (Math.Abs(value - _level) < 0.001)
+            {
+                return;
+            }
+
+            _level = value;
             OnPropertyChanged();
         }
     }

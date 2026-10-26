@@ -586,6 +586,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (e.PropertyName == nameof(MixerChannelRow.Level))
+        {
+            return;
+        }
+
         switch (e.PropertyName)
         {
             case nameof(MixerChannelRow.Volume):
@@ -636,6 +641,11 @@ public partial class MainWindow : Window
     private void OutputRow_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (_isInitializingUi || _isSyncingRoutes || sender is not MixerOutputRow row)
+        {
+            return;
+        }
+
+        if (e.PropertyName == nameof(MixerOutputRow.Level))
         {
             return;
         }
@@ -821,6 +831,11 @@ public partial class MainWindow : Window
             row.Level = 0d;
         }
 
+        foreach (var row in _outputRows)
+        {
+            row.Level = 0d;
+        }
+
         StatusText.Text = "停止しました。";
     }
 
@@ -833,6 +848,11 @@ public partial class MainWindow : Window
                 row.Level = 0d;
             }
 
+            foreach (var row in _outputRows)
+            {
+                row.Level = 0d;
+            }
+
             return;
         }
 
@@ -841,6 +861,14 @@ public partial class MainWindow : Window
         {
             var row = _channelRows[i];
             var peak = Math.Clamp(levels[i] * 1.6d, 0d, 1d);
+            row.Level = Math.Max(peak, row.Level * 0.72d);
+        }
+
+        var outputLevels = _mixer.GetOutputLevels();
+        for (var i = 0; i < _outputRows.Count && i < outputLevels.Length; i++)
+        {
+            var row = _outputRows[i];
+            var peak = Math.Clamp(outputLevels[i], 0d, 1d);
             row.Level = Math.Max(peak, row.Level * 0.72d);
         }
     }
@@ -911,6 +939,76 @@ public partial class MainWindow : Window
         row.SetProcess(candidate);
         SaveMixerSettings();
         RestartMixerIfRunning();
+    }
+
+    private void ChangeInputDevice_Click(object sender, RoutedEventArgs e)
+    {
+        if (ResolveRow<MixerChannelRow>(sender) is not { } row || row.Config.Kind == InputSourceKind.Process)
+        {
+            return;
+        }
+
+        var isLoopback = row.Config.Kind == InputSourceKind.Loopback;
+        var window = new DevicePickerWindow(
+            isLoopback ? "バーチャル入力のデバイスを選択" : "入力デバイスを選択",
+            isLoopback ? DataFlow.Render : DataFlow.Capture,
+            row.Config.DeviceId,
+            "新しく接続したデバイスが一覧に無いときは「再スキャン」を押してください。")
+        {
+            Owner = this
+        };
+
+        if (window.ShowDialog() == true)
+        {
+            ApplyDeviceSelection(row.SelectedDevice?.Id, window.SelectedDeviceId, id => row.Config.DeviceId = id);
+        }
+    }
+
+    private void ChangeOutputDevice_Click(object sender, RoutedEventArgs e)
+    {
+        if (ResolveRow<MixerOutputRow>(sender) is not { } row)
+        {
+            return;
+        }
+
+        var window = new DevicePickerWindow(
+            row.IsVirtual ? "仮想出力のデバイスを選択" : "出力デバイスを選択",
+            DataFlow.Render,
+            row.Config.DeviceId,
+            "CABLE Input などの仮想デバイスもここから選べます。接続したデバイスを探し直すときは「再スキャン」を押してください。")
+        {
+            Owner = this
+        };
+
+        if (window.ShowDialog() == true)
+        {
+            ApplyDeviceSelection(row.SelectedDevice?.Id, window.SelectedDeviceId, id => row.Config.DeviceId = id);
+        }
+    }
+
+    /// <summary>デバイスを選び直したあと、デバイス一覧と行を作り直してミックスを再開する。</summary>
+    private void ApplyDeviceSelection(string? currentId, string? selectedId, Action<string> apply)
+    {
+        var newId = selectedId ?? string.Empty;
+        if (string.Equals(currentId ?? string.Empty, newId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var wasRunning = _mixer is not null;
+        apply(newId);
+        SaveMixerSettings();
+        BuildMixerRows(reloadDevices: true);
+        RefreshVirtualDevices();
+
+        if (wasRunning)
+        {
+            RestartMixerIfRunning();
+        }
+        else
+        {
+            StatusText.Text = "デバイスを変更しました。「ミックス開始」で反映されます。";
+        }
     }
 
     private void MoveInputUp_Click(object sender, RoutedEventArgs e) => MoveInput(sender, -1);

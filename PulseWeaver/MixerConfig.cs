@@ -15,6 +15,12 @@ internal enum OutputRole
     Virtual
 }
 
+internal static class MixerLimits
+{
+    /// <summary>音量スライダーの上限。1.0 = 0 dB、2.0 = 約 +6 dB。XAML 側の Slider Maximum と揃えること。</summary>
+    public const double MaxVolume = 2.0;
+}
+
 internal sealed class MixerInputConfig
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");

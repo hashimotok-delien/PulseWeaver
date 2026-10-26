@@ -1,6 +1,7 @@
 <Window x:Class="PulseWeaver.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:PulseWeaver"
         Title="PulseWeaver" Height="820" Width="1240"
         MinHeight="700" MinWidth="1080"
         Background="#10141C" Foreground="#F1F5F9"
@@ -8,6 +9,7 @@
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+        <local:LevelToHeightConverter x:Key="LevelToHeight"/>
         <Style x:Key="TabButton" TargetType="RadioButton">
             <Setter Property="Foreground" Value="#A8B3C5"/>
             <Setter Property="FontSize" Value="15"/>
@@ -159,15 +161,28 @@
             </Setter>
         </Style>
 
-        <Style x:Key="Meter" TargetType="ProgressBar">
-            <Setter Property="Minimum" Value="0"/>
-            <Setter Property="Maximum" Value="1"/>
-            <Setter Property="Value" Value="0"/>
-            <Setter Property="Height" Value="6"/>
-            <Setter Property="Width" Value="70"/>
+        <Style x:Key="DeviceButton" TargetType="Button">
             <Setter Property="Background" Value="#232B3A"/>
-            <Setter Property="Foreground" Value="#5BD3A0"/>
+            <Setter Property="Foreground" Value="#C6D0DE"/>
             <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#2C374B"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="RowActionButton" TargetType="Button">
@@ -277,8 +292,8 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="44"/>
                     </Grid.ColumnDefinitions>
-                    <Slider Minimum="0" Maximum="1" Value="{Binding MonitorVolume, Mode=TwoWay}"
-                            VerticalAlignment="Center"/>
+                    <Slider Minimum="0" Maximum="2" Value="{Binding MonitorVolume, Mode=TwoWay}"
+                            VerticalAlignment="Center" ToolTip="100% を超えると増幅します（クリップに注意）"/>
                     <TextBlock Grid.Column="1" Text="{Binding MonitorVolume, StringFormat=P0}"
                                TextAlignment="Right" VerticalAlignment="Center"
                                Foreground="#A8B3C5" FontSize="11"/>
@@ -304,125 +319,145 @@
         </DataTemplate>
 
         <DataTemplate x:Key="ChannelRowTemplate">
-            <Grid Margin="0,0,0,9">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="136"/>
-                    <ColumnDefinition Width="*" MinWidth="150"/>
-                    <ColumnDefinition Width="118"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
+            <Border Width="204" Margin="0,0,10,10" Padding="12,10" Background="#151B27" CornerRadius="10">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
+                            <TextBox Style="{StaticResource NameBox}" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="クリックして名前を変更できます"/>
+                            <TextBlock Text="{Binding KindLabel}" Foreground="#7D8AA0" FontSize="11" Margin="0,1,0,0"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Style="{StaticResource RowActionButton}" Content="✕"
+                                VerticalAlignment="Top" Click="RemoveInput_Click" ToolTip="この入力を削除"/>
+                    </Grid>
 
-                <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
-                    <TextBox Style="{StaticResource NameBox}" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                             ToolTip="クリックして名前を変更できます"/>
-                    <TextBlock Text="{Binding KindLabel}" Foreground="#7D8AA0" FontSize="11" Margin="0,1,0,0"/>
+                    <Button Style="{StaticResource DeviceButton}" Margin="0,8,0,0" Click="ChangeInputDevice_Click"
+                            ToolTip="デバイスを選び直す（接続したデバイスを再スキャンできます）"
+                            Visibility="{Binding IsDeviceSource, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel>
+                            <TextBlock Text="デバイスを変更" FontSize="9" Foreground="#7D8AA0"/>
+                            <TextBlock Text="{Binding SelectedDeviceLabel}" TextTrimming="CharacterEllipsis" MaxWidth="156"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Button Style="{StaticResource DeviceButton}" Margin="0,8,0,0" Click="ChangeProcessButton_Click"
+                            ToolTip="取り込むアプリを選び直す"
+                            Visibility="{Binding IsProcessSource, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel>
+                            <TextBlock Text="アプリを変更" FontSize="9" Foreground="#7D8AA0"/>
+                            <TextBlock Text="{Binding ProcessLabel}" TextTrimming="CharacterEllipsis" MaxWidth="156"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Grid Margin="0,10,0,0" Height="150">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Slider Orientation="Vertical" Minimum="0" Maximum="2" Height="150"
+                                Value="{Binding Volume, Mode=TwoWay}" HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                ToolTip="100% を超えると増幅します（クリップに注意）"/>
+                        <Border Grid.Column="1" Width="10" Height="150" Margin="8,0,0,0" VerticalAlignment="Center"
+                                Background="#232B3A" CornerRadius="5" ClipToBounds="True">
+                            <Border Background="#5BD3A0" CornerRadius="5" VerticalAlignment="Bottom"
+                                    Height="{Binding Level, Converter={StaticResource LevelToHeight}, ConverterParameter=150}"/>
+                        </Border>
+                    </Grid>
+
+                    <TextBlock Text="{Binding Volume, StringFormat=P0}" HorizontalAlignment="Center" Margin="0,4,0,0"
+                               Foreground="#C6D0DE" FontSize="12" FontWeight="SemiBold"/>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,8,0,0">
+                        <ToggleButton Style="{StaticResource MiniToggle}" Content="M" Background="#E0574F"
+                                      IsChecked="{Binding Muted, Mode=TwoWay}" ToolTip="ミュート"/>
+                        <ToggleButton Style="{StaticResource MiniToggle}" Content="S" Background="#E0A94F"
+                                      IsChecked="{Binding Solo, Mode=TwoWay}" ToolTip="ソロ（これだけを鳴らす）"/>
+                        <ToggleButton Style="{StaticResource MiniToggle}" Content="MON" Width="34" FontSize="9"
+                                      Background="#4FB0E0" ToolTip="マイクモニター（送り先は 設定 &gt; 音声 で選べます）"
+                                      IsChecked="{Binding MonitorEnabled, Mode=TwoWay}"/>
+                    </StackPanel>
+
+                    <ItemsControl ItemsSource="{Binding Routes}" Margin="0,8,0,0" HorizontalAlignment="Center">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <ToggleButton Style="{StaticResource RouteToggle}" Content="{Binding Label}"
+                                              IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
+                        <Button Style="{StaticResource RowActionButton}" Content="↑" Click="MoveInputUp_Click"
+                                ToolTip="上へ"/>
+                        <Button Style="{StaticResource RowActionButton}" Content="↓" Click="MoveInputDown_Click"
+                                ToolTip="下へ"/>
+                    </StackPanel>
                 </StackPanel>
-
-                <ComboBox Grid.Column="1" ItemsSource="{Binding Options}"
-                          SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
-                          DisplayMemberPath="Name" Height="30" VerticalAlignment="Center"
-                          Visibility="{Binding IsDeviceSource, Converter={StaticResource BoolToVisibility}}"/>
-
-                <Grid Grid.Column="1" Visibility="{Binding IsProcessSource, Converter={StaticResource BoolToVisibility}}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding ProcessLabel}" VerticalAlignment="Center" Foreground="#C6D0DE"
-                               TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
-                    <Button Grid.Column="1" Content="変更" Padding="10,5" Click="ChangeProcessButton_Click"
-                            Background="#30394A" Foreground="#F1F5F9" BorderThickness="0" Cursor="Hand"/>
-                </Grid>
-
-                <Grid Grid.Column="2" Margin="12,0,4,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="40"/>
-                    </Grid.ColumnDefinitions>
-                    <Slider Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}"
-                            VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="1" Text="{Binding Volume, StringFormat=P0}"
-                               TextAlignment="Right" VerticalAlignment="Center"
-                               Foreground="#A8B3C5" FontSize="11"/>
-                </Grid>
-
-                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
-                    <ToggleButton Style="{StaticResource MiniToggle}" Content="M" Background="#E0574F"
-                                  IsChecked="{Binding Muted, Mode=TwoWay}" ToolTip="ミュート"/>
-                    <ToggleButton Style="{StaticResource MiniToggle}" Content="S" Background="#E0A94F"
-                                  IsChecked="{Binding Solo, Mode=TwoWay}" ToolTip="ソロ（これだけを鳴らす）"/>
-                    <ToggleButton Style="{StaticResource MiniToggle}" Content="MON" Width="34" FontSize="9"
-                                  Background="#4FB0E0" ToolTip="マイクモニター（送り先は 設定 &gt; 音声 で選べます）"
-                                  IsChecked="{Binding MonitorEnabled, Mode=TwoWay}"/>
-                </StackPanel>
-
-                <ProgressBar Grid.Column="4" Style="{StaticResource Meter}" Value="{Binding Level}"
-                             Margin="10,0,0,0" VerticalAlignment="Center"/>
-
-                <ItemsControl Grid.Column="5" ItemsSource="{Binding Routes}" Margin="10,0,0,0" VerticalAlignment="Center">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <WrapPanel Orientation="Horizontal"/>
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <ToggleButton Style="{StaticResource RouteToggle}" Content="{Binding Label}"
-                                          IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-
-                <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
-                    <Button Style="{StaticResource RowActionButton}" Content="↑" Click="MoveInputUp_Click"
-                            ToolTip="上へ"/>
-                    <Button Style="{StaticResource RowActionButton}" Content="↓" Click="MoveInputDown_Click"
-                            ToolTip="下へ"/>
-                    <Button Style="{StaticResource RowActionButton}" Content="✕" Click="RemoveInput_Click"
-                            ToolTip="この入力を削除"/>
-                </StackPanel>
-            </Grid>
+            </Border>
         </DataTemplate>
 
         <DataTemplate x:Key="OutputRowTemplate">
-            <Grid Margin="0,0,0,9">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="136"/>
-                    <ColumnDefinition Width="*" MinWidth="160"/>
-                    <ColumnDefinition Width="118"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel VerticalAlignment="Center" Margin="0,0,10,0">
-                    <TextBox Style="{StaticResource NameBox}" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                             ToolTip="クリックして名前を変更できます"/>
-                    <TextBlock Text="{Binding KindLabel}" Foreground="#7D8AA0" FontSize="11" Margin="0,1,0,0"/>
+            <Border Width="204" Margin="0,0,10,10" Padding="12,10" Background="#151B27" CornerRadius="10">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
+                            <TextBox Style="{StaticResource NameBox}" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     ToolTip="クリックして名前を変更できます"/>
+                            <TextBlock Text="{Binding KindLabel}" Foreground="#7D8AA0" FontSize="11" Margin="0,1,0,0"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Style="{StaticResource RowActionButton}" Content="✕"
+                                VerticalAlignment="Top" Click="RemoveOutput_Click" ToolTip="この出力を削除"/>
+                    </Grid>
+
+                    <Button Style="{StaticResource DeviceButton}" Margin="0,8,0,0" Click="ChangeOutputDevice_Click"
+                            ToolTip="デバイスを選び直す（接続したデバイスを再スキャンできます）">
+                        <StackPanel>
+                            <TextBlock Text="デバイスを変更" FontSize="9" Foreground="#7D8AA0"/>
+                            <TextBlock Text="{Binding SelectedDeviceLabel}" TextTrimming="CharacterEllipsis" MaxWidth="156"/>
+                        </StackPanel>
+                    </Button>
+
+                    <Grid Margin="0,10,0,0" Height="150">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Slider Orientation="Vertical" Minimum="0" Maximum="2" Height="150"
+                                Value="{Binding Volume, Mode=TwoWay}" HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                ToolTip="100% を超えると増幅します（クリップに注意）"/>
+                        <Border Grid.Column="1" Width="10" Height="150" Margin="8,0,0,0" VerticalAlignment="Center"
+                                Background="#232B3A" CornerRadius="5" ClipToBounds="True">
+                            <Border Background="#5BD3A0" CornerRadius="5" VerticalAlignment="Bottom"
+                                    Height="{Binding Level, Converter={StaticResource LevelToHeight}, ConverterParameter=150}"/>
+                        </Border>
+                    </Grid>
+
+                    <TextBlock Text="{Binding Volume, StringFormat=P0}" HorizontalAlignment="Center" Margin="0,4,0,0"
+                               Foreground="#C6D0DE" FontSize="12" FontWeight="SemiBold"/>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
+                        <Button Style="{StaticResource RowActionButton}" Content="↑" Click="MoveOutputUp_Click"
+                                ToolTip="上へ"/>
+                        <Button Style="{StaticResource RowActionButton}" Content="↓" Click="MoveOutputDown_Click"
+                                ToolTip="下へ"/>
+                    </StackPanel>
                 </StackPanel>
-                <ComboBox Grid.Column="1" ItemsSource="{Binding Options}"
-                          SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
-                          DisplayMemberPath="Name" Height="30" VerticalAlignment="Center"/>
-                <Grid Grid.Column="2" Margin="12,0,4,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="40"/>
-                    </Grid.ColumnDefinitions>
-                    <Slider Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}"
-                            VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="1" Text="{Binding Volume, StringFormat=P0}"
-                               TextAlignment="Right" VerticalAlignment="Center"
-                               Foreground="#A8B3C5" FontSize="11"/>
-                </Grid>
-                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
-                    <Button Style="{StaticResource RowActionButton}" Content="↑" Click="MoveOutputUp_Click"
-                            ToolTip="上へ"/>
-                    <Button Style="{StaticResource RowActionButton}" Content="↓" Click="MoveOutputDown_Click"
-                            ToolTip="下へ"/>
-                    <Button Style="{StaticResource RowActionButton}" Content="✕" Click="RemoveOutput_Click"
-                            ToolTip="この出力を削除"/>
-                </StackPanel>
-            </Grid>
+            </Border>
         </DataTemplate>
     </Window.Resources>
 
@@ -485,11 +520,17 @@
                                         <TextBlock x:Name="InputSectionTitle" Text="入力" Style="{StaticResource SectionTitle}"
                                                    Margin="0,0,0,4"/>
                                         <TextBlock Style="{StaticResource Caption}"
-                                                   Text="マイク・バーチャル入力・アプリをそれぞれの音量で混ぜ、出力ごとに振り分けます。"/>
+                                                   Text="マイク・バーチャル入力・アプリをそれぞれの音量で混ぜ、出力ごとに振り分けます。音量は 200% まで増幅できます。"/>
                                     </StackPanel>
                                 </DockPanel>
                                 <ItemsControl x:Name="InputList" ItemTemplate="{StaticResource ChannelRowTemplate}"
-                                              Margin="0,14,0,0"/>
+                                              Margin="0,14,0,0">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel Orientation="Horizontal"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                </ItemsControl>
                                 <TextBlock x:Name="InputEmptyText" Style="{StaticResource Caption}" Visibility="Collapsed"
                                            Text="入力がありません。右上のボタンから追加してください。"/>
                             </StackPanel>
@@ -512,7 +553,13 @@
                                     </StackPanel>
                                 </DockPanel>
                                 <ItemsControl x:Name="OutputList" ItemTemplate="{StaticResource OutputRowTemplate}"
-                                              Margin="0,14,0,0"/>
+                                              Margin="0,14,0,0">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel Orientation="Horizontal"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                </ItemsControl>
                                 <TextBlock x:Name="OutputEmptyText" Style="{StaticResource Caption}" Visibility="Collapsed"
                                            Text="出力がありません。右上のボタンから追加してください。"/>
                             </StackPanel>
@@ -600,7 +647,7 @@
                                     <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
                                                Text="小さいほど遅延は減りますが、音切れが起きやすくなります。次回ミックス開始時に反映されます。"/>
                                     <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0"
-                                               Text="音量・ミュート・ソロ・振り分けは動作中でも即時反映されます。デバイスの変更は「停止」してから再度「ミックス開始」してください。"/>
+                                               Text="音量・ミュート・ソロ・振り分けは動作中でも即時反映されます。デバイスを変更すると、ミックス中なら自動で開始し直します。"/>
                                 </StackPanel>
                             </Border>
 
