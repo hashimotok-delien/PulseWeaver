@@ -38,9 +38,9 @@ internal sealed class OutputLevelMeter : ISampleProvider
             }
         }
 
-        if (peak > Volatile.Read(ref _peak))
+        if (peak > 0f)
         {
-            Volatile.Write(ref _peak, peak);
+            ReportPeak(peak);
         }
 
         return read;
@@ -48,4 +48,18 @@ internal sealed class OutputLevelMeter : ISampleProvider
 
     /// <summary>前回の読み出し以降のピーク値（0〜1）。</summary>
     public float ConsumePeak() => Math.Min(1f, Interlocked.Exchange(ref _peak, 0f));
+
+    private void ReportPeak(float value)
+    {
+        float current;
+        do
+        {
+            current = Volatile.Read(ref _peak);
+            if (value <= current)
+            {
+                return;
+            }
+        }
+        while (Interlocked.CompareExchange(ref _peak, value, current) != current);
+    }
 }

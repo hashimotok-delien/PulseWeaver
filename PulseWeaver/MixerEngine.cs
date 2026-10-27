@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
@@ -29,8 +30,13 @@ internal sealed class MixerEngine : IDisposable
     private readonly List<string> _startupIssues = new();
     private readonly object _issueLock = new();
     private readonly InputSource?[] _inputs;
+    private readonly InputSource[] _activeInputs;
+    private readonly float[] _inputLevels;
+    private readonly float[] _outputLevels;
     private readonly OutputTarget?[] _outputTargets;
     private readonly string[] _outputIds;
+    private bool _anySolo;
+    private ProcessPriorityClass? _previousPriority;
     private bool _started;
     private bool _disposed;
 
@@ -40,7 +46,10 @@ internal sealed class MixerEngine : IDisposable
         int outputLatencyMs = 50)
     {
         _inputs = new InputSource?[inputs.Count];
+        _activeInputs = Array.Empty<InputSource>();
+        _inputLevels = new float[inputs.Count];
         _outputTargets = new OutputTarget?[outputs.Count];
+        _outputLevels = new float[outputs.Count];
         _outputIds = outputs.Select(output => output.Id).ToArray();
 
         try
@@ -86,6 +95,7 @@ internal sealed class MixerEngine : IDisposable
                 }
             }
 
+            _activeInputs = _inputs.OfType<InputSource>().ToArray();
             ApplyAllGains();
             BuildOutputs(outputLatencyMs);
         }
@@ -128,7 +138,9 @@ internal sealed class MixerEngine : IDisposable
             return;
         }
 
-        foreach (var input in _inputs.OfType<InputSource>())
+        RaiseProcessPriority();
+
+        foreach (var input in _activeInputs)
         {
             try
             {
@@ -141,6 +153,8 @@ internal sealed class MixerEngine : IDisposable
         }
 
         var startedOutputs = 0;
+        WaitForOutputPrebuffer();
+
         foreach (var target in _outputTargets.OfType<OutputTarget>())
         {
             if (target.Output is null)
@@ -171,38 +185,32 @@ internal sealed class MixerEngine : IDisposable
     }
 
     /// <summary>入力ごとのピーク値（0〜1）。読み出すと 0 にリセットされる。</summary>
+    /// <remarks>UI スレッドから一定間隔で読む前提で、配列を使い回して割り当てを抑える。</remarks>
     public float[] GetInputLevels()
     {
-        var levels = new float[_inputs.Length];
         for (var i = 0; i < _inputs.Length; i++)
         {
             if (_inputs[i] is not { } input)
             {
+                _inputLevels[i] = 0f;
                 continue;
             }
 
-            levels[i] = input.Peak;
-            input.Peak = 0f;
+            _inputLevels[i] = input.ConsumePeak();
         }
 
-        return levels;
+        return _inputLevels;
     }
 
     /// <summary>出力ごとのピーク値（0〜1）。読み出すと 0 にリセットされる。</summary>
     public float[] GetOutputLevels()
     {
-        var levels = new float[_outputTargets.Length];
         for (var i = 0; i < _outputTargets.Length; i++)
         {
-            if (_outputTargets[i]?.Meter is not { } meter)
-            {
-                continue;
-            }
-
-            levels[i] = meter.ConsumePeak();
+            _outputLevels[i] = _outputTargets[i]?.Meter?.ConsumePeak() ?? 0f;
         }
 
-        return levels;
+        return _outputLevels;
     }
 
     public void SetInputVolume(int inputIndex, float volume)
@@ -304,14 +312,14 @@ internal sealed class MixerEngine : IDisposable
 
     private void ApplyAllGains()
     {
-        var anySolo = _inputs.OfType<InputSource>().Any(input => input.Solo);
-        foreach (var input in _inputs.OfType<InputSource>())
+        _anySolo = _activeInputs.Any(input => input.Solo);
+        foreach (var input in _activeInputs)
         {
-            ApplyGains(input, anySolo);
+            ApplyGains(input, _anySolo);
         }
     }
 
-    private void ApplyGains(InputSource input) => ApplyGains(input, _inputs.OfType<InputSource>().Any(other => other.Solo));
+    private void ApplyGains(InputSource input) => ApplyGains(input, _anySolo);
 
     private void ApplyGains(InputSource input, bool anySolo)
     {
@@ -325,15 +333,122 @@ internal sealed class MixerEngine : IDisposable
             }
 
             var outputId = _outputIds[i];
-            if (!input.Routes.TryGetValue(outputId, out var routed) || !routed)
+            var routed = input.Routes.TryGetValue(outputId, out var enabled) && enabled;
+            var volume = !routed
+                ? 0f
+                : string.Equals(input.MonitorOutputId, outputId, StringComparison.Ordinal)
+                    ? effective * input.MonitorVolume
+                    : effective;
+
+            gain.Volume = volume;
+            SetGainActive(input, i, volume > 0f);
+        }
+    }
+
+    /// <summary>
+    /// 聞こえない出力には音声を積まないようにする。積むのを再開するときは古い音が
+    /// 一気に鳴らないようキューを空にする（ミュート解除時の唐突な再生も防げる）。
+    /// </summary>
+    private static void SetGainActive(InputSource input, int index, bool active)
+    {
+        if (input.Active[index] == active)
+        {
+            return;
+        }
+
+        if (active)
+        {
+            input.Buffers[index]?.ClearBuffer();
+        }
+
+        input.Active[index] = active;
+    }
+
+    /// <summary>
+    /// 出力を鳴らし始める前に、入力キューへ少しだけ音を溜める。
+    /// 再生と取り込みが同じ速さで進むため、一度でも空になると溜め直されず、
+    /// 負荷が高い間ずっと音切れが続いてしまう。最初に余裕を作っておくと途切れにくい。
+    /// </summary>
+    private void WaitForOutputPrebuffer()
+    {
+        if (_activeInputs.Length == 0 || _outputTargets.All(target => target?.Output is null))
+        {
+            return;
+        }
+
+        var deadline = Environment.TickCount64 + AudioBufferSettings.OutputPrebufferTimeoutMilliseconds;
+        while (!_disposed && Environment.TickCount64 < deadline)
+        {
+            var buffered = true;
+            foreach (var input in _activeInputs)
             {
-                gain.Volume = 0f;
-                continue;
+                for (var i = 0; i < input.Buffers.Length; i++)
+                {
+                    if (!input.Active[i] || input.Buffers[i] is not { } buffer)
+                    {
+                        continue;
+                    }
+
+                    var target = Math.Max(1, buffer.WaveFormat.AverageBytesPerSecond
+                        * AudioBufferSettings.OutputPrebufferMilliseconds / 1000);
+                    if (buffer.BufferedBytes < target)
+                    {
+                        buffered = false;
+                    }
+                }
             }
 
-            gain.Volume = string.Equals(input.MonitorOutputId, outputId, StringComparison.Ordinal)
-                ? effective * input.MonitorVolume
-                : effective;
+            if (buffered)
+            {
+                return;
+            }
+
+            Thread.Sleep(10);
+        }
+    }
+
+    private void RaiseProcessPriority()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            _previousPriority ??= process.PriorityClass;
+            if (process.PriorityClass < ProcessPriorityClass.AboveNormal)
+            {
+                process.PriorityClass = ProcessPriorityClass.AboveNormal;
+            }
+        }
+        catch (Exception exception)
+        {
+            // 優先度を上げられなくても音声処理は続けられる
+            AppLog.Info($"プロセスの優先度を変更できませんでした。{AudioErrorDescriber.Describe(exception)}");
+        }
+    }
+
+    private void RestoreProcessPriority()
+    {
+        if (_previousPriority is not { } previous)
+        {
+            return;
+        }
+
+        _previousPriority = null;
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            if (process.PriorityClass != previous)
+            {
+                process.PriorityClass = previous;
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Info($"プロセスの優先度を戻せませんでした。{AudioErrorDescriber.Describe(exception)}");
         }
     }
 
@@ -373,6 +488,7 @@ internal sealed class MixerEngine : IDisposable
             Capture = capture,
             Buffers = buffers,
             Gains = gains,
+            Active = new bool[_outputTargets.Length],
             Routes = new Dictionary<string, bool>(definition.Routes, StringComparer.Ordinal),
             Volume = (float)Math.Clamp(definition.Volume, 0f, MixerLimits.MaxVolume),
             Muted = definition.Muted,
@@ -394,16 +510,19 @@ internal sealed class MixerEngine : IDisposable
         var format = capture.WaveFormat;
         capture.DataAvailable += (_, args) =>
         {
-            foreach (var buffer in input.Buffers)
+            var buffers = input.Buffers;
+            var active = input.Active;
+            for (var i = 0; i < buffers.Length; i++)
             {
-                buffer?.AddSamples(args.Buffer, 0, args.BytesRecorded);
+                if (!active[i])
+                {
+                    continue;
+                }
+
+                buffers[i]?.AddSamples(args.Buffer, 0, args.BytesRecorded);
             }
 
-            var peak = PeakOf(args.Buffer, args.BytesRecorded, format);
-            if (peak > input.Peak)
-            {
-                input.Peak = peak;
-            }
+            input.ReportPeak(PeakOf(args.Buffer, args.BytesRecorded, format));
         };
 
         capture.RecordingStopped += (_, args) =>
@@ -556,8 +675,7 @@ internal sealed class MixerEngine : IDisposable
                 continue;
             }
 
-            var gains = _inputs
-                .OfType<InputSource>()
+            var gains = _activeInputs
                 .Select(input => input.Gains[i])
                 .Where(gain => gain is not null)
                 .Select(gain => gain!)
@@ -658,7 +776,7 @@ internal sealed class MixerEngine : IDisposable
 
         _disposed = true;
 
-        foreach (var input in _inputs.OfType<InputSource>())
+        foreach (var input in _activeInputs)
         {
             try
             {
@@ -705,10 +823,13 @@ internal sealed class MixerEngine : IDisposable
         }
 
         _deviceEnumerator.Dispose();
+        RestoreProcessPriority();
     }
 
     private sealed class InputSource
     {
+        private float _peak;
+
         public required string Label { get; init; }
 
         public required InputSourceKind Kind { get; init; }
@@ -718,6 +839,9 @@ internal sealed class MixerEngine : IDisposable
         public required BufferedWaveProvider?[] Buffers { get; init; }
 
         public required VolumeSampleProvider?[] Gains { get; init; }
+
+        /// <summary>出力ごとに音声を積んでいるか。UI スレッドが書き、取り込みスレッドが読む。</summary>
+        public required bool[] Active { get; init; }
 
         public required Dictionary<string, bool> Routes { get; init; }
 
@@ -737,7 +861,28 @@ internal sealed class MixerEngine : IDisposable
 
         public int ProcessId { get; set; }
 
-        public float Peak;
+        /// <summary>取り込みスレッドからピーク値を記録する（取りこぼしのないよう最大値を残す）。</summary>
+        public void ReportPeak(float value)
+        {
+            if (value <= 0f)
+            {
+                return;
+            }
+
+            float current;
+            do
+            {
+                current = Volatile.Read(ref _peak);
+                if (value <= current)
+                {
+                    return;
+                }
+            }
+            while (Interlocked.CompareExchange(ref _peak, value, current) != current);
+        }
+
+        /// <summary>記録したピーク値を取り出して 0 に戻す。</summary>
+        public float ConsumePeak() => Math.Min(1f, Interlocked.Exchange(ref _peak, 0f));
     }
 
     private sealed class OutputTarget

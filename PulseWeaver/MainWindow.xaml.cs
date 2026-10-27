@@ -901,6 +901,14 @@ public partial class MainWindow : Window
         }
 
         var levels = _mixer.GetInputLevels();
+        var outputLevels = _mixer.GetOutputLevels();
+
+        // トレイに格納中や最小化中はメーターが描画されないため、更新を省いて負荷を下げる
+        if (!IsVisible || WindowState == WindowState.Minimized)
+        {
+            return;
+        }
+
         for (var i = 0; i < _channelRows.Count && i < levels.Length; i++)
         {
             var row = _channelRows[i];
@@ -908,7 +916,6 @@ public partial class MainWindow : Window
             row.Level = Math.Max(peak, row.Level * 0.72d);
         }
 
-        var outputLevels = _mixer.GetOutputLevels();
         for (var i = 0; i < _outputRows.Count && i < outputLevels.Length; i++)
         {
             var row = _outputRows[i];

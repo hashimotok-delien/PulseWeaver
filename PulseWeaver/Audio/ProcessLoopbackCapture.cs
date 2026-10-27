@@ -76,7 +76,8 @@ internal sealed class ProcessLoopbackCapture : IInputCapture
         _worker = new Thread(WorkerLoop)
         {
             IsBackground = true,
-            Name = $"ProcessLoopback-{processId}"
+            Name = $"ProcessLoopback-{processId}",
+            Priority = ThreadPriority.AboveNormal
         };
         _worker.SetApartmentState(ApartmentState.MTA);
         _worker.Start();
