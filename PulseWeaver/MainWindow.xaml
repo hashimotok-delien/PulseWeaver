@@ -640,7 +640,8 @@
                                     <TextBlock Text="出力バッファ（レイテンシ）" Foreground="#C6D0DE"/>
                                     <ComboBox x:Name="LatencyCombo" Margin="0,6,0,0" Height="34" Width="220"
                                               HorizontalAlignment="Left" SelectionChanged="LatencyCombo_SelectionChanged">
-                                        <ComboBoxItem Content="50 ms（低遅延）" Tag="50"/>
+                                        <ComboBoxItem Content="20 ms（最小）" Tag="20"/>
+                                        <ComboBoxItem Content="50 ms（低遅延・既定）" Tag="50"/>
                                         <ComboBoxItem Content="100 ms（標準）" Tag="100"/>
                                         <ComboBoxItem Content="200 ms（安定重視）" Tag="200"/>
                                     </ComboBox>

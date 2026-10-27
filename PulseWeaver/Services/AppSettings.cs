@@ -31,7 +31,7 @@ internal sealed class AppSettings
 
     public string? DefaultProfile { get; set; }
 
-    public int OutputLatencyMs { get; set; } = 100;
+    public int OutputLatencyMs { get; set; } = 50;
 
     public DateTime? LastUpdateCheckUtc { get; set; }
 

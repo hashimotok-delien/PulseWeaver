@@ -30,7 +30,7 @@ internal sealed class ProcessLoopbackCapture : IInputCapture
     private const int Channels = 2;
     private const int BytesPerSample = 4;
     private const int BytesPerFrame = Channels * BytesPerSample;
-    private const long BufferDurationHns = 2_000_000;
+    private const long BufferDurationHns = AudioBufferSettings.CaptureLatencyMilliseconds * 10_000L;
 
     private static readonly Guid SubTypeIeeeFloat = new("00000003-0000-0010-8000-00AA00389B71");
 

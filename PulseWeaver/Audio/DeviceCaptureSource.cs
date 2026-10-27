@@ -12,7 +12,9 @@ internal sealed class DeviceCaptureSource : IInputCapture
 
     public DeviceCaptureSource(MMDevice device, bool loopback)
     {
-        _capture = loopback ? new WasapiLoopbackCapture(device) : new WasapiCapture(device);
+        _capture = loopback
+            ? new LowLatencyWasapiLoopbackCapture(device)
+            : new WasapiCapture(device, useEventSync: false, AudioBufferSettings.CaptureLatencyMilliseconds);
         _capture.DataAvailable += OnDataAvailable;
         _capture.RecordingStopped += OnRecordingStopped;
     }
@@ -46,5 +48,16 @@ internal sealed class DeviceCaptureSource : IInputCapture
         _capture.DataAvailable -= OnDataAvailable;
         _capture.RecordingStopped -= OnRecordingStopped;
         _capture.Dispose();
+    }
+
+    private sealed class LowLatencyWasapiLoopbackCapture : WasapiCapture
+    {
+        public LowLatencyWasapiLoopbackCapture(MMDevice device)
+            : base(device, useEventSync: false, AudioBufferSettings.CaptureLatencyMilliseconds)
+        {
+        }
+
+        protected override AudioClientStreamFlags GetAudioClientStreamFlags() =>
+            AudioClientStreamFlags.Loopback | base.GetAudioClientStreamFlags();
     }
 }

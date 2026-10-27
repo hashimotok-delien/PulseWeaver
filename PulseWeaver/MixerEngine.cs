@@ -37,7 +37,7 @@ internal sealed class MixerEngine : IDisposable
     public MixerEngine(
         IReadOnlyList<MixerInputDefinition> inputs,
         IReadOnlyList<MixerOutputDefinition> outputs,
-        int outputLatencyMs = 100)
+        int outputLatencyMs = 50)
     {
         _inputs = new InputSource?[inputs.Count];
         _outputTargets = new OutputTarget?[outputs.Count];
@@ -358,7 +358,7 @@ internal sealed class MixerEngine : IDisposable
 
             var buffer = new BufferedWaveProvider(capture.WaveFormat)
             {
-                BufferDuration = TimeSpan.FromSeconds(2),
+                BufferDuration = TimeSpan.FromMilliseconds(AudioBufferSettings.QueueDurationMilliseconds),
                 DiscardOnBufferOverflow = true,
                 ReadFully = true
             };
