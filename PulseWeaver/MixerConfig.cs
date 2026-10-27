@@ -49,9 +49,16 @@ internal sealed class MixerInputConfig
 
     public Dictionary<string, bool> Routes { get; set; } = new(StringComparer.Ordinal);
 
+    /// <summary>A1/B1 などストリップ表示名ごとの ON/OFF。出力 ID が振り直されても引き継げるよう保存する。</summary>
+    public Dictionary<string, bool> RouteSlots { get; set; } = new(StringComparer.Ordinal);
+
     public bool GetRoute(string outputId) => Routes.TryGetValue(outputId, out var enabled) && enabled;
 
     public bool SetRoute(string outputId, bool enabled) => Routes[outputId] = enabled;
+
+    public bool GetRouteSlot(string slot) => RouteSlots.TryGetValue(slot, out var enabled) && enabled;
+
+    public void SetRouteSlot(string slot, bool enabled) => RouteSlots[slot] = enabled;
 
     [JsonIgnore]
     public bool HasAnyRoute => Routes.Values.Any(enabled => enabled);
@@ -70,7 +77,8 @@ internal sealed class MixerInputConfig
         Solo = Solo,
         MonitorOutputId = MonitorOutputId,
         MonitorVolume = MonitorVolume,
-        Routes = new Dictionary<string, bool>(Routes, StringComparer.Ordinal)
+        Routes = new Dictionary<string, bool>(Routes, StringComparer.Ordinal),
+        RouteSlots = new Dictionary<string, bool>(RouteSlots, StringComparer.Ordinal)
     };
 }
 

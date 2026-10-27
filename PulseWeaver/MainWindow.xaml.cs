@@ -306,7 +306,8 @@ public partial class MainWindow : Window
 
         foreach (var row in _channelRows)
         {
-            if (_outputRows.Any(output => row.GetRoute(output.Config.Id)))
+            // 保存済みの ON/OFF（全 OFF を含む）は尊重し、未設定の入力だけ自動で振り分ける
+            if (row.HasRouteSettings)
             {
                 continue;
             }

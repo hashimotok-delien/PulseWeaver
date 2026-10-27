@@ -319,12 +319,42 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
 
     public bool GetRoute(string outputId) => _config.GetRoute(outputId);
 
+    /// <summary>現在の出力に対応する ON/OFF 設定が 1 つでも保存されているか（全 OFF も「設定あり」）。</summary>
+    public bool HasRouteSettings { get; private set; }
+
     public void BuildRoutes(IReadOnlyList<(string Id, string Label)> outputs)
     {
         Routes.Clear();
+        HasRouteSettings = false;
+
         foreach (var (id, label) in outputs)
         {
-            Routes.Add(new RouteToggle(id, label, _config.GetRoute(id), OnRouteToggled));
+            bool enabled;
+            if (_config.Routes.TryGetValue(id, out var byId))
+            {
+                enabled = byId;
+                HasRouteSettings = true;
+                _config.SetRouteSlot(label, enabled);
+            }
+            else if (_config.RouteSlots.TryGetValue(label, out var bySlot))
+            {
+                // 出力 ID が振り直されても A1/B1 の ON/OFF を引き継ぐ
+                enabled = bySlot;
+                _config.SetRoute(id, enabled);
+                HasRouteSettings = true;
+            }
+            else
+            {
+                enabled = false;
+            }
+
+            Routes.Add(new RouteToggle(id, label, enabled, OnRouteToggled));
+        }
+
+        var validIds = outputs.Select(output => output.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var staleId in _config.Routes.Keys.Where(key => !validIds.Contains(key)).ToArray())
+        {
+            _config.Routes.Remove(staleId);
         }
     }
 
@@ -334,6 +364,7 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
         foreach (var toggle in Routes.Where(toggle => toggle.OutputId == outputId))
         {
             toggle.SetSilently(enabled);
+            _config.SetRouteSlot(toggle.Label, enabled);
         }
     }
 
@@ -351,6 +382,8 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
     private void OnRouteToggled(RouteToggle toggle)
     {
         _config.SetRoute(toggle.OutputId, toggle.IsChecked);
+        _config.SetRouteSlot(toggle.Label, toggle.IsChecked);
+        HasRouteSettings = true;
         RouteChanged?.Invoke(this, toggle.OutputId);
     }
 

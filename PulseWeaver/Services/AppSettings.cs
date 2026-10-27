@@ -168,6 +168,9 @@ internal sealed class AppSettings
             {
                 input.Id = Guid.NewGuid().ToString("N");
             }
+
+            input.Routes ??= new Dictionary<string, bool>(StringComparer.Ordinal);
+            input.RouteSlots ??= new Dictionary<string, bool>(StringComparer.Ordinal);
         }
 
         foreach (var output in Outputs)
