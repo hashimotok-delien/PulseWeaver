@@ -69,14 +69,12 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
         int index,
         MixerInputConfig config,
         string defaultName,
-        AudioDeviceOption[] options,
-        AudioDeviceOption? selectedDevice)
+        AudioDeviceOption[] options)
     {
         Index = index;
         _config = config;
         DefaultName = defaultName;
         Options = options;
-        SelectedDevice = selectedDevice;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -134,13 +132,26 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
             }
 
             _config.DeviceId = id;
+            _config.DeviceName = string.IsNullOrEmpty(id) ? null : value?.Name;
             OnPropertyChanged();
             OnPropertyChanged(nameof(SelectedDeviceLabel));
         }
     }
 
     /// <summary>デバイス変更ボタンに表示する名前。</summary>
-    public string SelectedDeviceLabel => SelectedDevice?.Name ?? "（なし）";
+    public string SelectedDeviceLabel
+    {
+        get
+        {
+            var selected = SelectedDevice;
+            if (selected is not null && selected.Id.Length > 0)
+            {
+                return selected.Name;
+            }
+
+            return string.IsNullOrWhiteSpace(_config.DeviceName) ? "（なし）" : $"{_config.DeviceName}（未接続）";
+        }
+    }
 
     public string ProcessLabel => string.IsNullOrWhiteSpace(_config.ProcessName)
         ? "（アプリ未選択）"
@@ -400,14 +411,12 @@ internal sealed class MixerOutputRow : INotifyPropertyChanged
         int index,
         MixerOutputConfig config,
         string defaultName,
-        AudioDeviceOption[] options,
-        AudioDeviceOption? selectedDevice)
+        AudioDeviceOption[] options)
     {
         Index = index;
         _config = config;
         DefaultName = defaultName;
         Options = options;
-        SelectedDevice = selectedDevice;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -454,13 +463,26 @@ internal sealed class MixerOutputRow : INotifyPropertyChanged
             }
 
             _config.DeviceId = id;
+            _config.DeviceName = string.IsNullOrEmpty(id) ? null : value?.Name;
             OnPropertyChanged();
             OnPropertyChanged(nameof(SelectedDeviceLabel));
         }
     }
 
     /// <summary>デバイス変更ボタンに表示する名前。</summary>
-    public string SelectedDeviceLabel => SelectedDevice?.Name ?? "（なし）";
+    public string SelectedDeviceLabel
+    {
+        get
+        {
+            var selected = SelectedDevice;
+            if (selected is not null && selected.Id.Length > 0)
+            {
+                return selected.Name;
+            }
+
+            return string.IsNullOrWhiteSpace(_config.DeviceName) ? "（なし）" : $"{_config.DeviceName}（未接続）";
+        }
+    }
 
     public double Volume
     {

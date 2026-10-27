@@ -205,10 +205,14 @@ public partial class MainWindow : Window
                 outputLabels[i] = isVirtual ? $"B{++virtualOutputs}" : $"A{++physicalOutputs}";
 
                 var options = isVirtual ? virtualRenderOptions : renderOptions;
-                var selected = ResolveDevice(options, config.DeviceId, outputDefaults[i]);
-                config.DeviceId = ToSavedId(selected);
+                var selected = ResolveDevice(options, config.DeviceId, config.DeviceName, outputDefaults[i], out var missing);
+                if (!missing)
+                {
+                    config.DeviceId = ToSavedId(selected);
+                    config.DeviceName = selected.Id.Length > 0 ? selected.Name : null;
+                }
 
-                var row = new MixerOutputRow(i, config, outputLabels[i], options, selected);
+                var row = new MixerOutputRow(i, config, outputLabels[i], options);
                 row.PropertyChanged += OutputRow_PropertyChanged;
                 _outputRows.Add(row);
             }
@@ -257,11 +261,15 @@ public partial class MainWindow : Window
                 AudioDeviceOption? selected = null;
                 if (config.Kind != InputSourceKind.Process)
                 {
-                    selected = ResolveDevice(options, config.DeviceId, defaultId);
-                    config.DeviceId = ToSavedId(selected);
+                    selected = ResolveDevice(options, config.DeviceId, config.DeviceName, defaultId, out var missing);
+                    if (!missing)
+                    {
+                        config.DeviceId = ToSavedId(selected);
+                        config.DeviceName = selected.Id.Length > 0 ? selected.Name : null;
+                    }
                 }
 
-                var row = new MixerChannelRow(i, config, defaultName, options, selected);
+                var row = new MixerChannelRow(i, config, defaultName, options);
                 row.BuildRoutes(routeTargets);
                 row.BuildMonitorTargets(routeTargets);
                 row.PropertyChanged += ChannelRow_PropertyChanged;
@@ -396,11 +404,46 @@ public partial class MainWindow : Window
         }
     }
 
-    private static AudioDeviceOption ResolveDevice(AudioDeviceOption[] options, string? savedId, string? defaultId)
+    /// <summary>
+    /// 保存された ID からデバイスを選ぶ。見つからないときは保存名で照合し、
+    /// それでも無ければ missing を true にして「（なし）」を返す（保存値は消さない）。
+    /// </summary>
+    private static AudioDeviceOption ResolveDevice(
+        AudioDeviceOption[] options,
+        string? savedId,
+        string? savedName,
+        string? defaultId,
+        out bool missing)
     {
+        missing = false;
+
+        if (!string.IsNullOrEmpty(savedId))
+        {
+            var match = options.FirstOrDefault(option => option.Id == savedId);
+            if (match is not null)
+            {
+                return match;
+            }
+
+            // Bluetooth などでデバイス ID が振り直されることがあるため、保存した名前でも探す
+            if (!string.IsNullOrWhiteSpace(savedName))
+            {
+                var byName = options.FirstOrDefault(option =>
+                    option.Id.Length > 0 &&
+                    string.Equals(option.Name, savedName, StringComparison.OrdinalIgnoreCase));
+                if (byName is not null)
+                {
+                    return byName;
+                }
+            }
+
+            missing = true;
+            return options[0];
+        }
+
         if (savedId is not null)
         {
-            return options.FirstOrDefault(option => option.Id == savedId) ?? options[0];
+            return options[0];
         }
 
         if (!string.IsNullOrEmpty(defaultId))
@@ -954,6 +997,7 @@ public partial class MainWindow : Window
             isLoopback ? "バーチャル入力のデバイスを選択" : "入力デバイスを選択",
             isLoopback ? DataFlow.Render : DataFlow.Capture,
             row.Config.DeviceId,
+            row.Config.DeviceName,
             "新しく接続したデバイスが一覧に無いときは「再スキャン」を押してください。")
         {
             Owner = this
@@ -961,7 +1005,7 @@ public partial class MainWindow : Window
 
         if (window.ShowDialog() == true)
         {
-            ApplyDeviceSelection(row.SelectedDevice?.Id, window.SelectedDeviceId, id => row.Config.DeviceId = id);
+            ApplyDeviceSelection(row.Config.DeviceId, window.SelectedDeviceId, id => row.Config.DeviceId = id);
         }
     }
 
@@ -976,6 +1020,7 @@ public partial class MainWindow : Window
             row.IsVirtual ? "仮想出力のデバイスを選択" : "出力デバイスを選択",
             DataFlow.Render,
             row.Config.DeviceId,
+            row.Config.DeviceName,
             "CABLE Input などの仮想デバイスもここから選べます。接続したデバイスを探し直すときは「再スキャン」を押してください。")
         {
             Owner = this
@@ -983,7 +1028,7 @@ public partial class MainWindow : Window
 
         if (window.ShowDialog() == true)
         {
-            ApplyDeviceSelection(row.SelectedDevice?.Id, window.SelectedDeviceId, id => row.Config.DeviceId = id);
+            ApplyDeviceSelection(row.Config.DeviceId, window.SelectedDeviceId, id => row.Config.DeviceId = id);
         }
     }
 

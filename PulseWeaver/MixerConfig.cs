@@ -31,6 +31,9 @@ internal sealed class MixerInputConfig
 
     public string? DeviceId { get; set; }
 
+    /// <summary>選択時のデバイス名。未接続のときの表示と、ID が変わったときの再照合に使う。</summary>
+    public string? DeviceName { get; set; }
+
     public int? ProcessId { get; set; }
 
     public string? ProcessName { get; set; }
@@ -69,6 +72,7 @@ internal sealed class MixerInputConfig
         Name = Name,
         Kind = Kind,
         DeviceId = DeviceId,
+        DeviceName = DeviceName,
         ProcessId = ProcessId,
         ProcessName = ProcessName,
         IncludeProcessTree = IncludeProcessTree,
@@ -92,6 +96,9 @@ internal sealed class MixerOutputConfig
 
     public string? DeviceId { get; set; }
 
+    /// <summary>選択時のデバイス名。未接続のときの表示と、ID が変わったときの再照合に使う。</summary>
+    public string? DeviceName { get; set; }
+
     public double Volume { get; set; } = 0.8;
 
     public MixerOutputConfig Clone() => new()
@@ -100,6 +107,7 @@ internal sealed class MixerOutputConfig
         Name = Name,
         Role = Role,
         DeviceId = DeviceId,
+        DeviceName = DeviceName,
         Volume = Volume
     };
 }
