@@ -1408,7 +1408,13 @@ public partial class MainWindow : Window
             Visible = true,
             ContextMenuStrip = menu
         };
-        _trayIcon.DoubleClick += (_, _) => ShowFromTray();
+        _trayIcon.MouseClick += (_, args) =>
+        {
+            if (args.Button == WinForms.MouseButtons.Left)
+            {
+                ShowFromTray();
+            }
+        };
     }
 
     private static Drawing.Icon LoadAppIcon()
