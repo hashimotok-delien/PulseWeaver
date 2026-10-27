@@ -263,7 +263,11 @@ internal sealed class UpdateService : IDisposable
 
     public static void RunInstaller(string installerPath)
     {
-        var startInfo = new ProcessStartInfo(installerPath, "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS")
+        // /RELAUNCH=1 はインストーラ側（PulseWeaver.iss の [Code]）が解釈し、
+        // サイレントインストール完了後にアプリを自動起動する。
+        var startInfo = new ProcessStartInfo(
+            installerPath,
+            "/SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS /RELAUNCH=1")
         {
             UseShellExecute = true
         };

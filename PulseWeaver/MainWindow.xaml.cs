@@ -1296,7 +1296,7 @@ public partial class MainWindow : Window
         }
 
         var answer = MessageBox.Show(
-            $"{_availableRelease.TagName} にアップデートします。{Environment.NewLine}ダウンロード後にインストーラーが起動し、PulseWeaver は終了します。よろしいですか？",
+            $"{_availableRelease.TagName} にアップデートします。{Environment.NewLine}ダウンロード後にインストーラーが起動し、PulseWeaver は終了します。インストール完了後に自動で起動し直します。よろしいですか？",
             "アップデートの確認",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -1321,7 +1321,7 @@ public partial class MainWindow : Window
             });
 
             var installerPath = await _updateService.DownloadInstallerAsync(_availableRelease, progress, CancellationToken.None);
-            SetUpdateStatus("インストーラーを起動します。まもなくアプリを終了します…");
+            SetUpdateStatus("インストーラーを起動します。インストール完了後に自動で起動し直します…");
             UpdateService.RunInstaller(installerPath);
             Application.Current.Shutdown();
         }

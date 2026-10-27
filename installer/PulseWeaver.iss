@@ -33,6 +33,9 @@ SolidCompression=yes
 WizardStyle=modern
 SetupLogging=yes
 AllowNoIcons=yes
+; 自動アップデートでは完了後にアプリを明示的に起動し直すため、
+; Restart Manager による自動再起動と二重起動しないようにする。
+RestartApplications=no
 
 [Languages]
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
@@ -51,5 +54,34 @@ Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 Filename: "{#CableUrl}"; Description: "VB-CABLE の配布ページを開く（Discord 連携に必要）"; Flags: shellexec nowait postinstall skipifsilent; Tasks: cableguide
+
+[Code]
+{ アプリ内アップデートは /SILENT /RELAUNCH=1 でセットアップを起動する。
+  サイレント実行では完了画面が出ないため、インストール後にアプリを自動で起動し直す。
+  ウィザード実行時は完了画面の「PulseWeaver を起動」チェックボックスに任せる。 }
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  AppPath: String;
+  ResultCode: Integer;
+begin
+  if CurStep <> ssPostInstall then
+    Exit;
+  if not WizardSilent then
+    Exit;
+  if ExpandConstant('{param:RELAUNCH|0}') <> '1' then
+    Exit;
+
+  AppPath := ExpandConstant('{app}\{#AppExeName}');
+  if not FileExists(AppPath) then
+  begin
+    Log('更新後の自動起動をスキップしました（実行ファイルなし）: ' + AppPath);
+    Exit;
+  end;
+
+  if Exec(AppPath, '', ExpandConstant('{app}'), SW_SHOWNORMAL, False, ResultCode) then
+    Log('更新後にアプリを起動しました: ' + AppPath)
+  else
+    Log('更新後の自動起動に失敗しました: ' + AppPath);
+end;
