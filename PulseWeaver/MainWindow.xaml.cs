@@ -18,10 +18,12 @@ public partial class MainWindow : Window
     private readonly List<MixerChannelRow> _channelRows = new();
     private readonly List<MixerOutputRow> _outputRows = new();
     private readonly DispatcherTimer _levelTimer = new() { Interval = TimeSpan.FromMilliseconds(60) };
+    private readonly DispatcherTimer _deviceWatchTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private MixerEngine? _mixer;
     private IReadOnlyList<UpdateRelease> _releases = Array.Empty<UpdateRelease>();
     private IReadOnlyDictionary<string, IReadOnlyList<string>> _changelog =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<ChangelogEntry> _bundledChangelog = Array.Empty<ChangelogEntry>();
     private UpdateRelease? _availableRelease;
     private bool _isInitializingUi;
     private bool _isSyncingRoutes;
@@ -42,8 +44,12 @@ public partial class MainWindow : Window
         BuildMixerRows(reloadDevices: false);
         RefreshVirtualDevices();
         RefreshProfiles();
+        _bundledChangelog = UpdateService.LoadBundledChangelogEntries();
+        UpdateReleaseHistory();
         _levelTimer.Tick += LevelTimer_Tick;
         _levelTimer.Start();
+        _deviceWatchTimer.Tick += DeviceWatchTimer_Tick;
+        _deviceWatchTimer.Start();
         Loaded += MainWindow_Loaded;
         Closing += MainWindow_Closing;
         Closed += MainWindow_Closed;
@@ -69,7 +75,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            SetUpdateStatus("次回の自動確認待ちです。「最新かどうかを調べる」からいつでも確認できます。");
+            SetUpdateStatus("同梱の変更履歴を表示しています。次回の自動確認待ちです。「最新かどうかを調べる」からいつでも確認できます。");
         }
     }
 
@@ -88,6 +94,8 @@ public partial class MainWindow : Window
     {
         _levelTimer.Stop();
         _levelTimer.Tick -= LevelTimer_Tick;
+        _deviceWatchTimer.Stop();
+        _deviceWatchTimer.Tick -= DeviceWatchTimer_Tick;
 
         if (_trayIcon is not null)
         {
@@ -706,7 +714,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (e.PropertyName == nameof(MixerOutputRow.Level))
+        if (e.PropertyName == nameof(MixerOutputRow.Level) ||
+            e.PropertyName == nameof(MixerOutputRow.IsDeviceUnavailable))
         {
             return;
         }
@@ -714,6 +723,7 @@ public partial class MainWindow : Window
         switch (e.PropertyName)
         {
             case nameof(MixerOutputRow.SelectedDevice):
+                row.IsDeviceUnavailable = false;
                 SyncFeedbackRoutes();
                 NotifyDeviceChanged("出力先");
                 break;
@@ -964,6 +974,33 @@ public partial class MainWindow : Window
             var row = _outputRows[i];
             var peak = Math.Clamp(outputLevels[i], 0d, 1d);
             row.Level = Math.Max(peak, row.Level * 0.72d);
+        }
+    }
+
+    private void DeviceWatchTimer_Tick(object? sender, EventArgs e) => RefreshOutputDeviceAvailability();
+
+    private void RefreshOutputDeviceAvailability()
+    {
+        foreach (var row in _outputRows)
+        {
+            // 実際に出力に使うデバイス（未接続時は既定デバイスに置き換わっている）を確認する
+            var deviceId = row.SelectedDevice?.Id;
+            row.IsDeviceUnavailable = !string.IsNullOrEmpty(deviceId) && !IsDeviceActive(deviceId);
+        }
+    }
+
+    /// <summary>デバイスが現在も接続されていて使用できる状態かどうか。</summary>
+    private bool IsDeviceActive(string deviceId)
+    {
+        try
+        {
+            using var device = _deviceEnumerator.GetDevice(deviceId);
+            return device.State == DeviceState.Active;
+        }
+        catch (Exception)
+        {
+            // デバイスが見つからない（接続が切れた）場合は出力できない
+            return false;
         }
     }
 
@@ -1300,7 +1337,14 @@ public partial class MainWindow : Window
 
     private void UpdateReleaseHistory()
     {
-        var items = _releases
+        var items = _releases.Count > 0 ? BuildReleaseItems() : BuildChangelogItems();
+
+        ReleaseHistoryList.ItemsSource = items;
+        ReleaseHistoryEmptyText.Visibility = items.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private ReleaseHistoryItem[] BuildReleaseItems() =>
+        _releases
             .Select(release => new ReleaseHistoryItem(
                 release.IsPrerelease ? $"{release.TagName}（プレリリース）" : release.TagName,
                 release.Name,
@@ -1309,9 +1353,19 @@ public partial class MainWindow : Window
                 GetChangeLines(release.Version)))
             .ToArray();
 
-        ReleaseHistoryList.ItemsSource = items;
-        ReleaseHistoryEmptyText.Visibility = items.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-    }
+    private ReleaseHistoryItem[] BuildChangelogItems() =>
+        _bundledChangelog
+            .Select(entry =>
+            {
+                var isCurrent = string.Equals(entry.Version, AppInfo.Version, StringComparison.OrdinalIgnoreCase);
+                return new ReleaseHistoryItem(
+                    isCurrent ? $"v{entry.Version}（現在）" : $"v{entry.Version}",
+                    string.Empty,
+                    entry.PublishedAt?.ToString("yyyy/MM/dd") ?? string.Empty,
+                    $"{AppInfo.ReleasesUrl}/tag/v{entry.Version}",
+                    entry.Changes.Select(line => $"・{line}").ToArray());
+            })
+            .ToArray();
 
     private IReadOnlyList<string> GetChangeLines(string version)
     {
@@ -1506,7 +1560,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ShowFromTray()
+    internal void ShowFromTray()
     {
         Show();
         if (WindowState == WindowState.Minimized)

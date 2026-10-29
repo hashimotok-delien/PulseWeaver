@@ -1,10 +1,16 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace PulseWeaver;
+
+internal sealed record ChangelogEntry(
+    string Version,
+    DateTime? PublishedAt,
+    IReadOnlyList<string> Changes);
 
 internal sealed record UpdateRelease(
     string Version,
@@ -131,7 +137,7 @@ internal sealed class UpdateService : IDisposable
         return LoadEmbeddedChangelog();
     }
 
-    private static IReadOnlyDictionary<string, IReadOnlyList<string>> LoadEmbeddedChangelog()
+    private static string? ReadEmbeddedChangelog()
     {
         try
         {
@@ -140,24 +146,56 @@ internal sealed class UpdateService : IDisposable
                 .FirstOrDefault(resource => resource.EndsWith("CHANGELOG.md", StringComparison.OrdinalIgnoreCase));
             if (name is null)
             {
-                return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+                return null;
             }
 
             using var stream = assembly.GetManifestResourceStream(name)!;
             using var reader = new StreamReader(stream);
-            return ParseChangelog(reader.ReadToEnd());
+            return reader.ReadToEnd();
         }
         catch (Exception exception)
         {
             AppLog.Error("同梱 CHANGELOG の読み込みに失敗しました。", exception);
-            return new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+            return null;
         }
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> LoadEmbeddedChangelog()
+    {
+        var result = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in LoadBundledChangelogEntries())
+        {
+            result[entry.Version] = entry.Changes;
+        }
+
+        return result;
+    }
+
+    /// <summary>ネットワークに接続せず、同梱の CHANGELOG.md からリリース履歴を読み取ります。</summary>
+    public static IReadOnlyList<ChangelogEntry> LoadBundledChangelogEntries()
+    {
+        var markdown = ReadEmbeddedChangelog();
+        return markdown is null
+            ? Array.Empty<ChangelogEntry>()
+            : ParseChangelogEntries(markdown);
     }
 
     internal static IReadOnlyDictionary<string, IReadOnlyList<string>> ParseChangelog(string markdown)
     {
         var result = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in ParseChangelogEntries(markdown))
+        {
+            result[entry.Version] = entry.Changes;
+        }
+
+        return result;
+    }
+
+    internal static IReadOnlyList<ChangelogEntry> ParseChangelogEntries(string markdown)
+    {
+        var result = new List<ChangelogEntry>();
         string? currentVersion = null;
+        DateTime? currentDate = null;
         string? currentSection = null;
         var items = new List<string>();
 
@@ -165,7 +203,7 @@ internal sealed class UpdateService : IDisposable
         {
             if (currentVersion is not null)
             {
-                result[currentVersion] = items.ToArray();
+                result.Add(new ChangelogEntry(currentVersion, currentDate, items.ToArray()));
             }
         }
 
@@ -175,7 +213,9 @@ internal sealed class UpdateService : IDisposable
             if (line.StartsWith("## ", StringComparison.Ordinal))
             {
                 Commit();
-                currentVersion = ExtractVersion(line[3..]);
+                var heading = line[3..];
+                currentVersion = ExtractVersion(heading);
+                currentDate = ExtractDate(heading);
                 currentSection = null;
                 items = new List<string>();
                 continue;
@@ -215,12 +255,36 @@ internal sealed class UpdateService : IDisposable
             var end = text.IndexOf(']');
             if (end > 1)
             {
-                return VersionComparer.Normalize(text[1..end]);
+                return NormalizeVersion(text[1..end]);
             }
         }
 
         var token = text.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-        return token is null ? null : VersionComparer.Normalize(token);
+        return token is null ? null : NormalizeVersion(token);
+    }
+
+    private static string? NormalizeVersion(string token)
+    {
+        var version = VersionComparer.Normalize(token);
+        // 「未リリース」のようなバージョン番号でない見出しは履歴に含めない
+        return version.Length == 0 || !char.IsAsciiDigit(version[0]) ? null : version;
+    }
+
+    private static DateTime? ExtractDate(string heading)
+    {
+        var separatorIndex = heading.LastIndexOf(" - ", StringComparison.Ordinal);
+        if (separatorIndex < 0)
+        {
+            return null;
+        }
+
+        return DateTime.TryParse(
+            heading[(separatorIndex + 3)..].Trim(),
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var date)
+            ? date
+            : null;
     }
 
     public async Task<string> DownloadInstallerAsync(UpdateRelease release, IProgress<double>? progress, CancellationToken cancellationToken)

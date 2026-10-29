@@ -536,6 +536,7 @@ internal sealed class MixerOutputRow : INotifyPropertyChanged
 {
     private readonly MixerOutputConfig _config;
     private double _level;
+    private bool _isDeviceUnavailable;
 
     public MixerOutputRow(
         int index,
@@ -611,6 +612,22 @@ internal sealed class MixerOutputRow : INotifyPropertyChanged
             }
 
             return string.IsNullOrWhiteSpace(_config.DeviceName) ? "（なし）" : $"{_config.DeviceName}（未接続）";
+        }
+    }
+
+    /// <summary>選択中の出力デバイスに接続できていない場合に true（デバイス名を赤く点滅させる）。</summary>
+    public bool IsDeviceUnavailable
+    {
+        get => _isDeviceUnavailable;
+        set
+        {
+            if (_isDeviceUnavailable == value)
+            {
+                return;
+            }
+
+            _isDeviceUnavailable = value;
+            OnPropertyChanged();
         }
     }
 

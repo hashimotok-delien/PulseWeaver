@@ -513,7 +513,30 @@
                             ToolTip="デバイスを選び直す（接続したデバイスを再スキャンできます）">
                         <StackPanel>
                             <TextBlock Text="デバイスを変更" FontSize="9" Foreground="#7D8AA0"/>
-                            <TextBlock Text="{Binding SelectedDeviceLabel}" TextTrimming="CharacterEllipsis" MaxWidth="188"/>
+                            <TextBlock Text="{Binding SelectedDeviceLabel}" TextTrimming="CharacterEllipsis" MaxWidth="188">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsDeviceUnavailable}" Value="True">
+                                                <Setter Property="Foreground" Value="#FF5C5C"/>
+                                                <Setter Property="ToolTip" Value="デバイスに接続できません。デバイスを変更してください。"/>
+                                                <DataTrigger.EnterActions>
+                                                    <BeginStoryboard x:Name="OutputDeviceBlink">
+                                                        <Storyboard>
+                                                            <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                                             From="1" To="0.15" Duration="0:0:0.6"
+                                                                             AutoReverse="True" RepeatBehavior="Forever"/>
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </DataTrigger.EnterActions>
+                                                <DataTrigger.ExitActions>
+                                                    <StopStoryboard BeginStoryboardName="OutputDeviceBlink"/>
+                                                </DataTrigger.ExitActions>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </StackPanel>
                     </Button>
 
@@ -953,7 +976,7 @@
                                     </ItemsControl>
                                     <TextBlock x:Name="ReleaseHistoryEmptyText" Style="{StaticResource Caption}"
                                                Margin="10,6,10,6" Visibility="Collapsed"
-                                               Text="履歴はまだありません。「最新かどうかを調べる」で取得します。"/>
+                                               Text="変更履歴を読み込めませんでした。「最新かどうかを調べる」で再取得できます。"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
