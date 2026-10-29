@@ -46,6 +46,21 @@ internal sealed class MixerInputConfig
 
     public bool Solo { get; set; }
 
+    /// <summary>モノラル化（左右をまとめる）。</summary>
+    public bool Mono { get; set; }
+
+    /// <summary>ノイズゲートの効き（0 = 切、10 = 最大）。</summary>
+    public double Gate { get; set; }
+
+    /// <summary>コンプレッサーの効き（0 = 切、10 = 最大）。</summary>
+    public double Comp { get; set; }
+
+    /// <summary>左右の定位（-1 = 左、0 = 中央、+1 = 右）。</summary>
+    public double PanX { get; set; }
+
+    /// <summary>前後の定位（-1 = 背面、0 = 中央、+1 = 正面）。</summary>
+    public double PanY { get; set; }
+
     public string? MonitorOutputId { get; set; }
 
     public double MonitorVolume { get; set; } = 0.8;
@@ -79,6 +94,11 @@ internal sealed class MixerInputConfig
         Volume = Volume,
         Muted = Muted,
         Solo = Solo,
+        Mono = Mono,
+        Gate = Gate,
+        Comp = Comp,
+        PanX = PanX,
+        PanY = PanY,
         MonitorOutputId = MonitorOutputId,
         MonitorVolume = MonitorVolume,
         Routes = new Dictionary<string, bool>(Routes, StringComparer.Ordinal),
@@ -101,6 +121,22 @@ internal sealed class MixerOutputConfig
 
     public double Volume { get; set; } = 0.8;
 
+    public bool Muted { get; set; }
+
+    /// <summary>モノラル化（左右をまとめる）。</summary>
+    public bool Mono { get; set; }
+
+    public bool EqEnabled { get; set; }
+
+    /// <summary>低域（120 Hz シェルフ）の増減 dB。</summary>
+    public double EqLow { get; set; }
+
+    /// <summary>中域（1 kHz ピーク）の増減 dB。</summary>
+    public double EqMid { get; set; }
+
+    /// <summary>高域（8 kHz シェルフ）の増減 dB。</summary>
+    public double EqHigh { get; set; }
+
     public MixerOutputConfig Clone() => new()
     {
         Id = Id,
@@ -108,6 +144,12 @@ internal sealed class MixerOutputConfig
         Role = Role,
         DeviceId = DeviceId,
         DeviceName = DeviceName,
-        Volume = Volume
+        Volume = Volume,
+        Muted = Muted,
+        Mono = Mono,
+        EqEnabled = EqEnabled,
+        EqLow = EqLow,
+        EqMid = EqMid,
+        EqHigh = EqHigh
     };
 }

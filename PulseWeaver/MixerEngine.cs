@@ -17,9 +17,24 @@ internal sealed record MixerInputDefinition(
     bool Solo,
     string? MonitorOutputId,
     float MonitorVolume,
-    IReadOnlyDictionary<string, bool> Routes);
+    IReadOnlyDictionary<string, bool> Routes,
+    bool Mono = false,
+    double Gate = 0d,
+    double Comp = 0d,
+    double PanX = 0d,
+    double PanY = 0d);
 
-internal sealed record MixerOutputDefinition(string Id, string Label, string? DeviceId, float Volume);
+internal sealed record MixerOutputDefinition(
+    string Id,
+    string Label,
+    string? DeviceId,
+    float Volume,
+    bool Muted = false,
+    bool Mono = false,
+    bool EqEnabled = false,
+    double EqLow = 0d,
+    double EqMid = 0d,
+    double EqHigh = 0d);
 
 internal sealed class MixerEngine : IDisposable
 {
@@ -69,7 +84,16 @@ internal sealed class MixerEngine : IDisposable
                         Label = outputs[i].Label,
                         Device = device,
                         MixFormat = device.AudioClient.MixFormat,
-                        Volume = (float)Math.Clamp(outputs[i].Volume, 0f, MixerLimits.MaxVolume)
+                        Volume = (float)Math.Clamp(outputs[i].Volume, 0f, MixerLimits.MaxVolume),
+                        Muted = outputs[i].Muted,
+                        Dsp = new OutputDspParameters
+                        {
+                            Mono = outputs[i].Mono,
+                            EqEnabled = outputs[i].EqEnabled,
+                            EqLow = outputs[i].EqLow,
+                            EqMid = outputs[i].EqMid,
+                            EqHigh = outputs[i].EqHigh
+                        }
                     };
                 }
                 catch (Exception exception)
@@ -276,9 +300,83 @@ internal sealed class MixerEngine : IDisposable
         }
 
         target.Volume = (float)Math.Clamp(volume, 0f, MixerLimits.MaxVolume);
+        ApplyOutputGain(target);
+    }
+
+    public void SetOutputMuted(int outputIndex, bool muted)
+    {
+        if (outputIndex < 0 || outputIndex >= _outputTargets.Length || _outputTargets[outputIndex] is not { } target)
+        {
+            return;
+        }
+
+        target.Muted = muted;
+        ApplyOutputGain(target);
+    }
+
+    public void SetOutputMono(int outputIndex, bool mono)
+    {
+        if (outputIndex < 0 || outputIndex >= _outputTargets.Length || _outputTargets[outputIndex] is not { } target)
+        {
+            return;
+        }
+
+        target.Dsp.Mono = mono;
+    }
+
+    public void SetOutputEq(int outputIndex, bool enabled, double low, double mid, double high)
+    {
+        if (outputIndex < 0 || outputIndex >= _outputTargets.Length || _outputTargets[outputIndex] is not { } target)
+        {
+            return;
+        }
+
+        target.Dsp.EqLow = low;
+        target.Dsp.EqMid = mid;
+        target.Dsp.EqHigh = high;
+        target.Dsp.EqEnabled = enabled;
+    }
+
+    public void SetInputMono(int inputIndex, bool mono)
+    {
+        if (TryGetInput(inputIndex, out var input))
+        {
+            input.Dsp.Mono = mono;
+        }
+    }
+
+    public void SetInputGate(int inputIndex, double gate)
+    {
+        if (TryGetInput(inputIndex, out var input))
+        {
+            input.Dsp.Gate = gate;
+        }
+    }
+
+    public void SetInputComp(int inputIndex, double comp)
+    {
+        if (TryGetInput(inputIndex, out var input))
+        {
+            input.Dsp.Comp = comp;
+        }
+    }
+
+    public void SetInputPan(int inputIndex, double panX, double panY)
+    {
+        if (TryGetInput(inputIndex, out var input))
+        {
+            input.Dsp.PanX = panX;
+            input.Dsp.PanY = panY;
+        }
+    }
+
+    private static float OutputGain(OutputTarget target) => target.Muted ? 0f : target.Volume;
+
+    private static void ApplyOutputGain(OutputTarget target)
+    {
         if (target.Master is not null)
         {
-            target.Master.Volume = target.Volume;
+            target.Master.Volume = OutputGain(target);
         }
     }
 
@@ -463,6 +561,14 @@ internal sealed class MixerEngine : IDisposable
 
         var buffers = new BufferedWaveProvider?[_outputTargets.Length];
         var gains = new VolumeSampleProvider?[_outputTargets.Length];
+        var dspParameters = new InputDspParameters
+        {
+            Gate = definition.Gate,
+            Comp = definition.Comp,
+            PanX = definition.PanX,
+            PanY = definition.PanY,
+            Mono = definition.Mono
+        };
 
         for (var i = 0; i < _outputTargets.Length; i++)
         {
@@ -478,7 +584,8 @@ internal sealed class MixerEngine : IDisposable
                 ReadFully = true
             };
             buffers[i] = buffer;
-            gains[i] = new VolumeSampleProvider(CreateInternalChain(buffer));
+            gains[i] = new VolumeSampleProvider(
+                new InputDspSampleProvider(CreateInternalChain(buffer), dspParameters));
         }
 
         var input = new InputSource
@@ -488,6 +595,7 @@ internal sealed class MixerEngine : IDisposable
             Capture = capture,
             Buffers = buffers,
             Gains = gains,
+            Dsp = dspParameters,
             Active = new bool[_outputTargets.Length],
             Routes = new Dictionary<string, bool>(definition.Routes, StringComparer.Ordinal),
             Volume = (float)Math.Clamp(definition.Volume, 0f, MixerLimits.MaxVolume),
@@ -690,7 +798,10 @@ internal sealed class MixerEngine : IDisposable
             try
             {
                 var mixer = new MixingSampleProvider(gains) { ReadFully = true };
-                target.Master = new VolumeSampleProvider(mixer) { Volume = target.Volume };
+                target.Master = new VolumeSampleProvider(new OutputDspSampleProvider(mixer, target.Dsp))
+                {
+                    Volume = OutputGain(target)
+                };
                 target.Meter = new OutputLevelMeter(target.Master);
                 var output = new WasapiOut(target.Device, AudioClientShareMode.Shared, true, Math.Clamp(outputLatencyMs, 20, 500));
                 output.Init(CreateOutputWaveProvider(target.Meter, target.MixFormat));
@@ -845,6 +956,8 @@ internal sealed class MixerEngine : IDisposable
 
         public required Dictionary<string, bool> Routes { get; init; }
 
+        public required InputDspParameters Dsp { get; init; }
+
         public float Volume { get; set; }
 
         public bool Muted { get; set; }
@@ -894,6 +1007,10 @@ internal sealed class MixerEngine : IDisposable
         public required WaveFormat MixFormat { get; init; }
 
         public required float Volume { get; set; }
+
+        public bool Muted { get; set; }
+
+        public required OutputDspParameters Dsp { get; init; }
 
         public VolumeSampleProvider? Master { get; set; }
 

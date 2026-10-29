@@ -649,6 +649,23 @@ public partial class MainWindow : Window
                 _mixer?.SetInputSolo(row.Index, row.Solo);
                 break;
 
+            case nameof(MixerChannelRow.Mono):
+                _mixer?.SetInputMono(row.Index, row.Mono);
+                break;
+
+            case nameof(MixerChannelRow.Gate):
+                _mixer?.SetInputGate(row.Index, row.Gate);
+                break;
+
+            case nameof(MixerChannelRow.Comp):
+                _mixer?.SetInputComp(row.Index, row.Comp);
+                break;
+
+            case nameof(MixerChannelRow.PanX):
+            case nameof(MixerChannelRow.PanY):
+                _mixer?.SetInputPan(row.Index, row.PanX, row.PanY);
+                break;
+
             case nameof(MixerChannelRow.MonitorVolume):
                 _mixer?.SetMonitorVolume(row.Index, (float)row.MonitorVolume);
                 break;
@@ -703,6 +720,21 @@ public partial class MainWindow : Window
 
             case nameof(MixerOutputRow.Volume):
                 _mixer?.SetOutputVolume(row.Index, (float)row.Volume);
+                break;
+
+            case nameof(MixerOutputRow.Muted):
+                _mixer?.SetOutputMuted(row.Index, row.Muted);
+                break;
+
+            case nameof(MixerOutputRow.Mono):
+                _mixer?.SetOutputMono(row.Index, row.Mono);
+                break;
+
+            case nameof(MixerOutputRow.EqEnabled):
+            case nameof(MixerOutputRow.EqLow):
+            case nameof(MixerOutputRow.EqMid):
+            case nameof(MixerOutputRow.EqHigh):
+                _mixer?.SetOutputEq(row.Index, row.EqEnabled, row.EqLow, row.EqMid, row.EqHigh);
                 break;
         }
 
@@ -763,7 +795,12 @@ public partial class MainWindow : Window
                 row.Solo,
                 row.MonitorOutputId,
                 (float)row.MonitorVolume,
-                new Dictionary<string, bool>(row.Config.Routes, StringComparer.Ordinal)))
+                new Dictionary<string, bool>(row.Config.Routes, StringComparer.Ordinal),
+                row.Mono,
+                row.Gate,
+                row.Comp,
+                row.PanX,
+                row.PanY))
             .ToArray();
 
         var outputs = _outputRows
@@ -771,7 +808,13 @@ public partial class MainWindow : Window
                 row.Config.Id,
                 row.Name,
                 string.IsNullOrEmpty(row.SelectedDevice?.Id) ? null : row.SelectedDevice!.Id,
-                (float)row.Volume))
+                (float)row.Volume,
+                row.Muted,
+                row.Mono,
+                row.EqEnabled,
+                row.EqLow,
+                row.EqMid,
+                row.EqHigh))
             .ToArray();
 
         if (outputs.All(output => output.DeviceId is null))

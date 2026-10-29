@@ -170,6 +170,113 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
 
             _config.Volume = clamped;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(GainDb));
+            OnPropertyChanged(nameof(GainText));
+        }
+    }
+
+    /// <summary>フェーダーの値（dB）。-∞ は無音。</summary>
+    public double GainDb
+    {
+        get => MixerGain.RoundDb(MixerGain.ToDb(_config.Volume));
+        set
+        {
+            var gain = MixerGain.FromDb(MixerGain.RoundDb(value));
+            if (Math.Abs(gain - _config.Volume) < 0.00001)
+            {
+                OnPropertyChanged();
+                return;
+            }
+
+            _config.Volume = gain;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(Volume));
+            OnPropertyChanged(nameof(GainText));
+        }
+    }
+
+    public string GainText => MixerGain.Format(MixerGain.ToDb(_config.Volume));
+
+    /// <summary>3D 定位の左右（-1 = 左、+1 = 右）。</summary>
+    public double PanX
+    {
+        get => _config.PanX;
+        set
+        {
+            var clamped = Math.Clamp(value, -1d, 1d);
+            if (Math.Abs(clamped - _config.PanX) < 0.001)
+            {
+                return;
+            }
+
+            _config.PanX = clamped;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>3D 定位の前後（-1 = 背面、+1 = 正面）。</summary>
+    public double PanY
+    {
+        get => _config.PanY;
+        set
+        {
+            var clamped = Math.Clamp(value, -1d, 1d);
+            if (Math.Abs(clamped - _config.PanY) < 0.001)
+            {
+                return;
+            }
+
+            _config.PanY = clamped;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>ノイズゲートの効き（0〜10）。</summary>
+    public double Gate
+    {
+        get => _config.Gate;
+        set
+        {
+            var clamped = Math.Clamp(value, 0d, 10d);
+            if (Math.Abs(clamped - _config.Gate) < 0.001)
+            {
+                return;
+            }
+
+            _config.Gate = clamped;
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>コンプレッサーの効き（0〜10）。</summary>
+    public double Comp
+    {
+        get => _config.Comp;
+        set
+        {
+            var clamped = Math.Clamp(value, 0d, 10d);
+            if (Math.Abs(clamped - _config.Comp) < 0.001)
+            {
+                return;
+            }
+
+            _config.Comp = clamped;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool Mono
+    {
+        get => _config.Mono;
+        set
+        {
+            if (_config.Mono == value)
+            {
+                return;
+            }
+
+            _config.Mono = value;
+            OnPropertyChanged();
         }
     }
 
@@ -309,8 +416,31 @@ internal sealed class MixerChannelRow : INotifyPropertyChanged
 
             _config.MonitorVolume = clamped;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(MonitorGainDb));
+            OnPropertyChanged(nameof(MonitorGainText));
         }
     }
+
+    /// <summary>モニター音量の dB 表示用。</summary>
+    public double MonitorGainDb
+    {
+        get => MixerGain.RoundDb(MixerGain.ToDb(_config.MonitorVolume));
+        set
+        {
+            var gain = MixerGain.FromDb(MixerGain.RoundDb(value));
+            if (Math.Abs(gain - _config.MonitorVolume) < 0.00001)
+            {
+                return;
+            }
+
+            _config.MonitorVolume = gain;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(MonitorVolume));
+            OnPropertyChanged(nameof(MonitorGainText));
+        }
+    }
+
+    public string MonitorGainText => MixerGain.Format(MixerGain.ToDb(_config.MonitorVolume));
 
     /// <summary>レベルメーター表示用（0〜1）。</summary>
     public double Level
@@ -497,7 +627,106 @@ internal sealed class MixerOutputRow : INotifyPropertyChanged
 
             _config.Volume = clamped;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(GainDb));
+            OnPropertyChanged(nameof(GainText));
         }
+    }
+
+    /// <summary>フェーダーの値（dB）。-∞ は無音。</summary>
+    public double GainDb
+    {
+        get => MixerGain.RoundDb(MixerGain.ToDb(_config.Volume));
+        set
+        {
+            var gain = MixerGain.FromDb(MixerGain.RoundDb(value));
+            if (Math.Abs(gain - _config.Volume) < 0.00001)
+            {
+                OnPropertyChanged();
+                return;
+            }
+
+            _config.Volume = gain;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(Volume));
+            OnPropertyChanged(nameof(GainText));
+        }
+    }
+
+    public string GainText => MixerGain.Format(MixerGain.ToDb(_config.Volume));
+
+    public bool Muted
+    {
+        get => _config.Muted;
+        set
+        {
+            if (_config.Muted == value)
+            {
+                return;
+            }
+
+            _config.Muted = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool Mono
+    {
+        get => _config.Mono;
+        set
+        {
+            if (_config.Mono == value)
+            {
+                return;
+            }
+
+            _config.Mono = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public bool EqEnabled
+    {
+        get => _config.EqEnabled;
+        set
+        {
+            if (_config.EqEnabled == value)
+            {
+                return;
+            }
+
+            _config.EqEnabled = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public double EqLow
+    {
+        get => _config.EqLow;
+        set => SetEq(value, _config.EqLow, v => _config.EqLow = v, nameof(EqLow));
+    }
+
+    public double EqMid
+    {
+        get => _config.EqMid;
+        set => SetEq(value, _config.EqMid, v => _config.EqMid = v, nameof(EqMid));
+    }
+
+    public double EqHigh
+    {
+        get => _config.EqHigh;
+        set => SetEq(value, _config.EqHigh, v => _config.EqHigh = v, nameof(EqHigh));
+    }
+
+    private void SetEq(double value, double current, Action<double> apply, string propertyName)
+    {
+        var clamped = Math.Clamp(Math.Round(value, 1), -12d, 12d);
+        if (Math.Abs(clamped - current) < 0.001)
+        {
+            return;
+        }
+
+        apply(clamped);
+        OnPropertyChanged(propertyName);
     }
 
     /// <summary>出力レベルメーター表示用（0〜1）。</summary>
